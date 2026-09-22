@@ -5,7 +5,6 @@ import { Header } from './components/Header'
 import { Toolbar } from './components/Toolbar'
 import { CanvasEditor } from './components/CanvasEditor'
 import { ValidationBar } from './components/ValidationBar'
-import { NodeCatalogPanel } from './components/panels/NodeCatalogPanel'
 import { NodeDetailDrawer } from './components/panels/NodeDetailDrawer'
 import { NewTreeDialog } from './components/panels/NewTreeDialog'
 import { CreateRelationshipDialog } from './components/panels/CreateRelationshipDialog'
@@ -27,7 +26,6 @@ export default function App() {
         <CanvasEditor />
         <ValidationBar />
 
-        <NodeCatalogPanel />
         <NodeDetailDrawer />
         <NewTreeDialog />
         <CreateRelationshipDialog />

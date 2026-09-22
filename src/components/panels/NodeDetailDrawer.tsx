@@ -56,9 +56,14 @@ export function NodeDetailDrawer() {
     .filter(Boolean)
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/10" onClick={close} />
-      <div className="fixed right-0 top-0 z-40 flex h-full w-[360px] flex-col border-l border-[var(--ink-300)] bg-[var(--paper)] shadow-xl">
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+      onClick={close}
+    >
+      <div
+        className="flex max-h-[85vh] w-[420px] flex-col border border-[var(--ink-400)] bg-[var(--paper)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between border-b border-[var(--ink-200)] px-4 py-3">
           <h2 className="font-technical text-[12px] font-semibold uppercase tracking-wide text-[var(--ink-900)]">
             Node Detail
@@ -209,6 +214,6 @@ export function NodeDetailDrawer() {
           </button>
         </div>
       </div>
-    </>
+    </div>
   )
 }

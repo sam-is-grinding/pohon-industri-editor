@@ -469,19 +469,11 @@ export function CanvasEditor() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedNodeIds, selectedEdgeId, removeSelectedNodes, removeSelectedEdge, mode, setMode])
 
-  // Handle hit-targets shrink along with everything else as you zoom out, which makes wiring up
-  // a relationship between two far-apart nodes fiddly right when you need the overview most.
-  //
   // The handle lives inside `.react-flow__viewport`, which React Flow itself scales with a CSS
-  // `transform: scale(zoom)` — so a naive `1 / zoom` compensation on the handle's own width
-  // cancels out exactly once that ancestor transform is applied, leaving the on-screen size
-  // completely unchanged. To actually grow the ON-SCREEN hitbox as you zoom out, the
-  // compensation has to overshoot by an extra `1 / zoom`, i.e. scale by `1 / zoom²` — see the
-  // `.react-flow__handle` rule in index.css that consumes this as --handle-zoom-scale. Only
-  // kicks in below zoom=1 (zooming out), never shrinks handles when zoomed in, and is capped
-  // so it doesn't get silly at the min zoom level (0.3).
-  const handleZoomScale =
-    viewport.zoom < 1 ? Math.min(12, 1 / (viewport.zoom * viewport.zoom)) : 1
+  // `transform: scale(zoom)`. To keep the handle's ON-SCREEN size constant at any zoom level,
+  // its own flow-space size must scale by the inverse, `1 / zoom` — the two cancel out exactly.
+  // See the `.react-flow__handle` rule in index.css that consumes this as --handle-zoom-scale.
+  const handleZoomScale = 1 / viewport.zoom
 
   return (
     <div className="relative flex-1 overflow-hidden bg-[var(--paper)]">

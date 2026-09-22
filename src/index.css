@@ -96,17 +96,15 @@ body {
   stroke-width: 2.5;
 }
 
-/* Handles keep their visual size at a normal zoom level, but grow (both the dot and its hit
-   area) the further out you zoom — driven by --handle-zoom-scale, set on the canvas wrapper in
-   CanvasEditor from the current viewport zoom (1 at zoom=1, up to 3x at min zoom). Without
-   this, wiring up a relationship between two far-apart nodes is fiddly right when zooming out
-   to see the whole tree is exactly what you need to do it. */
+/* Handles keep a constant on-screen size at any zoom level — driven by --handle-zoom-scale, set
+   on the canvas wrapper in CanvasEditor to the inverse of the current viewport zoom, which
+   cancels out the scale transform React Flow applies to the viewport. */
 .react-flow__handle {
   width: calc(9px * var(--handle-zoom-scale, 1)) !important;
   height: calc(9px * var(--handle-zoom-scale, 1)) !important;
   border-radius: 999px !important;
   background: var(--ink-900) !important;
-  border: 2px solid var(--paper) !important;
+  border: calc(2px * var(--handle-zoom-scale, 1)) solid var(--paper) !important;
 }
 
 .react-flow__handle:hover {

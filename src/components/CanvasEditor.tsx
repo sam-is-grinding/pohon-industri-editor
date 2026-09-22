@@ -6,6 +6,7 @@ import {
   Controls,
   MiniMap,
   useReactFlow,
+  useUpdateNodeInternals,
   applyNodeChanges,
   type Node,
   type NodeChange,
@@ -92,8 +93,11 @@ export function CanvasEditor() {
   const requestConnection = useTreeStore((s) => s.requestConnection)
   const removeSelectedNodes = useTreeStore((s) => s.removeSelectedNodes)
   const removeSelectedEdge = useTreeStore((s) => s.removeSelectedEdge)
+  const undo = useTreeStore((s) => s.undo)
+  const redo = useTreeStore((s) => s.redo)
 
   const { screenToFlowPosition } = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
 
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -199,7 +203,7 @@ export function CanvasEditor() {
           selected: e.id === selectedEdgeId,
           style: {
             strokeWidth: e.id === selectedEdgeId ? 2.5 : 1.5,
-            stroke: e.id === selectedEdgeId ? 'var(--signal-accent)' : 'var(--ink-500)',
+            stroke: e.id === selectedEdgeId ? 'var(--selected)' : 'var(--ink-500)',
           },
           markerEnd: { type: 'arrowclosed' as const, color: 'var(--ink-500)', width: 16, height: 16 },
         })),
@@ -285,25 +289,41 @@ export function CanvasEditor() {
     if (mode === 'connect') setMode('pan')
   }, [selectNodes, selectEdge, mode, setMode])
 
-  const onMove = useCallback((_: unknown, vp: Viewport) => {
-    setViewport(vp)
-  }, [])
+  // Handles are scaled inversely with zoom (see --handle-zoom-scale / .react-flow__handle in
+  // index.css) so their ON-SCREEN size stays constant regardless of zoom. The side effect: their
+  // flow-space box size literally changes every time zoom changes. React Flow only recomputes a
+  // node's handle anchor points (which is what edges attach to) when it's explicitly told that
+  // node's internals changed — it has no way to know our CSS just resized a handle purely
+  // because the viewport zoomed. Without telling it, an edge keeps pointing at the handle's
+  // stale pre-zoom anchor until something else (e.g. dragging the node) happens to force a
+  // remeasure — exactly the "edge stays offset at the old size until you nudge the node" bug.
+  // So: whenever zoom actually changes, explicitly ask React Flow to remeasure every node.
+  const lastZoomRef = useRef(viewport.zoom)
+  const onMove = useCallback(
+    (_: unknown, vp: Viewport) => {
+      setViewport(vp)
+      if (vp.zoom !== lastZoomRef.current) {
+        lastZoomRef.current = vp.zoom
+        updateNodeInternals(nodesRef.current.map((n) => n.id))
+      }
+    },
+    [updateNodeInternals],
+  )
 
   // ---------------------------------------------------------------------------------------
   // Right-click + hold + drag => rubber-band multi-select.
   //
-  // The naive approach would be "let a plain right-click reach React Flow's own
-  // onPaneContextMenu/onNodeContextMenu as before, and only swallow the native `contextmenu`
-  // event once we've detected real drag movement". That doesn't work: browsers (confirmed in
-  // Chromium here, and this matches documented Chrome/Firefox behavior generally) fire
-  // `contextmenu` immediately on right mousedown — *before* mousemove or mouseup — so by the
-  // time we could detect a drag, the popup menu would already have opened.
-  //
-  // So instead we ALWAYS suppress the native contextmenu event (see
-  // onCanvasContextMenuCapture below) and decide what a right-click gesture meant ourselves,
-  // once it's over: at pointerup, if the button never moved past the threshold, we resolve it
-  // as a plain right-click (open the node context menu or the quick-add popover, whichever
-  // fits where it landed); if it did move, it was a rubber-band selection and no popup opens.
+  // Prevention of the native browser menu is delegated to React Flow's own onPaneContextMenu /
+  // onNodeContextMenu props below — NOT a hand-rolled capture listener on a wrapper div. That
+  // custom-capture approach used to live here and reliably leaked the native menu through on
+  // real-world testing; React Flow attaches these two callbacks directly to the actual pane/node
+  // DOM elements itself, and calling preventDefault() from inside them is what the earlier,
+  // simpler version of this app relied on and never had this problem — so we go back to that
+  // as the actual suppression mechanism, and only use it purely to preventDefault (no popup
+  // logic in here), because at the moment `contextmenu` fires we don't yet know if this is going
+  // to turn into a drag (mousemove/up haven't happened yet). What a right-click gesture actually
+  // resolves to (open the node menu / open quick-add / do nothing because it was a drag) is
+  // decided once the gesture is over, in handlePointerUp below, exactly as before.
   // ---------------------------------------------------------------------------------------
   const sortedStagesRef = useRef(sortedStages)
   useEffect(() => {
@@ -315,7 +335,7 @@ export function CanvasEditor() {
     screenToFlowPositionRef.current = screenToFlowPosition
   }, [screenToFlowPosition])
 
-  const resolveRightClickRef = useRef<(clientX: number, clientY: number) => void>(() => {})
+  const resolveRightClickRef = useRef<(clientX: number, clientY: number) => void>(() => { })
   resolveRightClickRef.current = (clientX, clientY) => {
     const nodeEl = document.elementFromPoint(clientX, clientY)?.closest('.react-flow__node')
     const nodeId = nodeEl?.getAttribute('data-id')
@@ -398,8 +418,8 @@ export function CanvasEditor() {
       setBoxSelectVisual(null)
       if (!gesture.moved) {
         // No real drag happened — treat it as a plain right-click (the native contextmenu
-        // event for it was already swallowed, back at mousedown; see
-        // onCanvasContextMenuCapture) and resolve it ourselves instead.
+        // event for it was already swallowed via onPaneContextMenu/onNodeContextMenu) and
+        // resolve it ourselves instead.
         resolveRightClickRef.current(e.clientX, e.clientY)
       }
     }
@@ -417,6 +437,9 @@ export function CanvasEditor() {
   const onCanvasPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 2) return
+
+      e.preventDefault()
+
       rightDragRef.current = {
         pointerId: e.pointerId,
         startX: e.clientX,
@@ -429,14 +452,43 @@ export function CanvasEditor() {
     [selectedNodeIds],
   )
 
-  // Chromium (and this matches Chrome/Firefox generally) fires `contextmenu` right on
-  // mousedown for the right button — well before it knows whether this will turn into a
-  // drag — so there's no "was it a drag" signal available yet at this point. We always
-  // swallow it here and decide what to do once the gesture actually finishes, in
-  // handlePointerUp above.
-  const onCanvasContextMenuCapture = useCallback((e: React.MouseEvent) => {
+  // Chromium/Firefox/Safari all fire `contextmenu` before we can know whether the gesture will
+  // turn into a drag, so these two just swallow the native menu immediately and unconditionally
+  // — same as the previous, reliable version of this app. They don't decide what to show; that
+  // happens in handlePointerUp once we know whether the button moved.
+  const onPaneContextMenu = useCallback((e: React.MouseEvent | MouseEvent) => {
     e.preventDefault()
-    e.stopPropagation()
+  }, [])
+
+  const onNodeContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+  }, [])
+
+  // Belt-and-suspenders layer for the empty-canvas case: a genuine native, capture-phase
+  // `contextmenu` listener on window, completely independent of React Flow's own prop wiring.
+  //
+  // Bug that was here before: this used to gate on `if (e.button === 2)` before calling
+  // preventDefault(). That check is wrong for a `contextmenu` event specifically — `.button` on
+  // `contextmenu` is unreliable across browsers (often 0, not 2, even for a genuine right-click),
+  // so the condition silently failed and preventDefault() never actually ran. That's exactly why
+  // it only ever leaked on empty canvas: node right-clicks were still caught by
+  // onNodeContextMenu (unconditional, no button check), but empty-canvas clicks had nothing else
+  // backing them up once this conditional silently no-opped. Fix: never gate a `contextmenu`
+  // handler on `.button` — always prevent it unconditionally, the same way onPaneContextMenu/
+  // onNodeContextMenu above already do.
+  useEffect(() => {
+    const preventBrowserContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+    }
+
+    window.addEventListener('contextmenu', preventBrowserContextMenu, {
+      capture: true,
+      passive: false,
+    })
+
+    return () => {
+      window.removeEventListener('contextmenu', preventBrowserContextMenu, { capture: true })
+    }
   }, [])
 
   // ---------------------------------------------------------------------------------------
@@ -451,6 +503,21 @@ export function CanvasEditor() {
       const isTextEntry =
         tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable
       if (isTextEntry) return
+
+      // Ctrl+Z / Cmd+Z => undo. Ctrl+Shift+Z / Cmd+Shift+Z => redo (also accepts the
+      // Ctrl+Y convention some people reach for out of habit).
+      const isUndoRedoModifier = e.ctrlKey || e.metaKey
+      if (isUndoRedoModifier && !e.altKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (isUndoRedoModifier && !e.altKey && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
+        return
+      }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedNodeIds.length > 0) {
@@ -467,13 +534,32 @@ export function CanvasEditor() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedNodeIds, selectedEdgeId, removeSelectedNodes, removeSelectedEdge, mode, setMode])
+  }, [
+    selectedNodeIds,
+    selectedEdgeId,
+    removeSelectedNodes,
+    removeSelectedEdge,
+    mode,
+    setMode,
+    undo,
+    redo,
+  ])
+
+  
 
   // The handle lives inside `.react-flow__viewport`, which React Flow itself scales with a CSS
-  // `transform: scale(zoom)`. To keep the handle's ON-SCREEN size constant at any zoom level,
-  // its own flow-space size must scale by the inverse, `1 / zoom` — the two cancel out exactly.
-  // See the `.react-flow__handle` rule in index.css that consumes this as --handle-zoom-scale.
+  // `transform: scale(zoom)`. To keep the handle's ON-SCREEN size (both the visible dot and its
+  // wider hit/hover area) constant at any zoom level, their flow-space size must scale by the
+  // inverse, `1 / zoom` — the two cancel out exactly. See the `.react-flow__handle` rules in
+  // index.css that consume this as --handle-zoom-scale.
   const handleZoomScale = 1 / viewport.zoom
+
+  // React Flow's own "how close do I need to be to grab/snap onto a handle" radius
+  // (`connectionRadius`, in flow-space units, default 20) suffers the exact same problem: at a
+  // fixed value it gets easier to hit when zoomed in and much harder when zoomed out. Scaling it
+  // by the same inverse-zoom factor keeps starting/finishing a relationship equally easy no
+  // matter how zoomed out the canvas is.
+  const connectionRadius = 20 * handleZoomScale
 
   return (
     <div className="relative flex-1 overflow-hidden bg-[var(--paper)]">
@@ -484,7 +570,6 @@ export function CanvasEditor() {
         className="relative h-[calc(100%-52px)] bg-[var(--paper)]"
         style={{ '--handle-zoom-scale': handleZoomScale } as React.CSSProperties}
         onPointerDown={onCanvasPointerDown}
-        onContextMenuCapture={onCanvasContextMenuCapture}
       >
         <StageColumnGuides translateX={viewport.x} zoom={viewport.zoom} />
 
@@ -498,14 +583,17 @@ export function CanvasEditor() {
           onConnectEnd={onConnectEnd}
           onNodeDragStop={onNodeDragStop}
           onNodeClick={onNodeClick}
+          onNodeContextMenu={onNodeContextMenu}
           onEdgeClick={onEdgeClick}
           onEdgeDoubleClick={onEdgeDoubleClick}
           onPaneClick={onPaneClick}
+          onPaneContextMenu={onPaneContextMenu}
           onMove={onMove}
           panOnScroll
           zoomOnScroll
           minZoom={0.3}
           maxZoom={2}
+          connectionRadius={connectionRadius}
           proOptions={{ hideAttribution: true }}
           className="rf-transparent-bg"
           defaultEdgeOptions={{ type: 'default' }}
@@ -533,7 +621,7 @@ export function CanvasEditor() {
             const height = Math.abs(boxSelectVisual.curClientY - boxSelectVisual.startClientY)
             return (
               <div
-                className="pointer-events-none absolute z-30 border border-dashed border-[var(--signal-accent)] bg-[var(--signal-accent)]/10"
+                className="pointer-events-none absolute z-30 border border-dashed border-[var(--selected)] bg-[var(--selected)]/10"
                 style={{ left, top, width, height }}
               />
             )

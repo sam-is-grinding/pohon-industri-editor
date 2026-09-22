@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
 @import 'tailwindcss';
 
 :root {
@@ -13,6 +14,7 @@
   --ink-200: #dcdce0;
   --ink-100: #eeeef0;
   --ink-50: #f6f6f7;
+
   --paper: #fbfbfa;
 
   --signal-produced: #3d7a4f;
@@ -20,6 +22,8 @@
   --signal-critical: #b23b32;
   --signal-import-gap: #a8781f;
   --signal-accent: #c8481f;
+
+  --selected: #5b9df5;
 
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
@@ -48,16 +52,20 @@ body {
   font-family: var(--font-mono);
 }
 
-/* React Flow's own <Background> component (dots) now draws the grid, so it pans/zooms with
-   the canvas. This class just keeps React Flow's root transparent so the paper-colored
-   background and dashed stage guides underneath (see StageColumnGuides) stay visible. */
+/* =========================================================
+   React Flow background
+   ========================================================= */
+
 .rf-transparent-bg,
 .rf-transparent-bg .react-flow__pane,
 .rf-transparent-bg .react-flow__viewport {
   background: transparent;
 }
 
-/* React Flow chrome overrides for the monochrome/technical look */
+/* =========================================================
+   React Flow chrome
+   ========================================================= */
+
 .react-flow__attribution {
   display: none;
 }
@@ -87,31 +95,154 @@ body {
   background: var(--paper) !important;
 }
 
+/* =========================================================
+   Edges
+   ========================================================= */
+
 .react-flow__edge-path {
   stroke: var(--ink-500);
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--signal-accent);
+  stroke: var(--selected);
   stroke-width: 2.5;
 }
 
-/* Handles keep a constant on-screen size at any zoom level — driven by --handle-zoom-scale, set
-   on the canvas wrapper in CanvasEditor to the inverse of the current viewport zoom, which
-   cancels out the scale transform React Flow applies to the viewport. */
+/* =========================================================
+   HANDLE
+   =========================================================
+
+   Handle:
+   - 24x24 = invisible hit/click area
+   - ::before = dashed visual ring
+   - ::after = small visual dot
+
+   IMPORTANT:
+   No --handle-zoom-scale here.
+
+   Everything is defined in React Flow's canvas coordinate system,
+   so the entire handle naturally scales together with the node
+   when zooming in/out.
+   ========================================================= */
+
 .react-flow__handle {
-  width: calc(9px * var(--handle-zoom-scale, 1)) !important;
-  height: calc(9px * var(--handle-zoom-scale, 1)) !important;
+  width: 24px !important;
+  height: 24px !important;
+
   border-radius: 999px !important;
-  background: var(--ink-900) !important;
-  border: calc(2px * var(--handle-zoom-scale, 1)) solid var(--paper) !important;
+
+  background: transparent !important;
+  border: none !important;
+
+  cursor: crosshair;
 }
 
-.react-flow__handle:hover {
-  background: var(--signal-accent) !important;
+/* Visual layers */
+
+.react-flow__handle::before,
+.react-flow__handle::after {
+  content: '';
+
+  position: absolute;
+
+  top: 50%;
+  left: 50%;
+
+  transform: translate(-50%, -50%);
+
+  pointer-events: none;
+
+  border-radius: 999px;
+
+  box-sizing: border-box;
 }
 
-/* thin custom scrollbars for panels */
+/* =========================================================
+   DASHED RING
+   =========================================================
+
+   Dynamic with React Flow zoom.
+   It is NOT compensated with inverse zoom.
+   ========================================================= */
+
+.react-flow__handle::before {
+  width: 24px;
+  height: 24px;
+
+  border: 1.25px dashed var(--ink-400);
+
+  opacity: 0.55;
+
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease,
+    border-style 120ms ease;
+}
+
+/* =========================================================
+   CENTER DOT
+   =========================================================
+
+   Small visual marker.
+
+   Because there is no --handle-zoom-scale,
+   this naturally scales together with the canvas/node.
+   ========================================================= */
+
+.react-flow__handle::after {
+  width: 5px;
+  height: 5px;
+
+  background: var(--ink-500);
+
+  transition:
+    background 120ms ease,
+    width 120ms ease,
+    height 120ms ease,
+    border-radius 120ms ease;
+}
+
+/* =========================================================
+   HANDLE HOVER / CONNECTING
+   ========================================================= */
+
+.react-flow__handle:hover::before,
+.react-flow__handle.connectingfrom::before {
+  border-color: var(--selected);
+  border-style: solid;
+  opacity: 0.9;
+}
+
+/* =========================================================
+   PLUS ICON ON HOVER
+   =========================================================
+
+   Also follows canvas zoom naturally.
+   ========================================================= */
+
+.react-flow__handle:hover::after,
+.react-flow__handle.connectingfrom::after {
+  width: 10px;
+  height: 10px;
+
+  background:
+    linear-gradient(
+      var(--selected),
+      var(--selected)
+    ) center / 100% 2px no-repeat,
+
+    linear-gradient(
+      var(--selected),
+      var(--selected)
+    ) center / 2px 100% no-repeat;
+
+  border-radius: 0;
+}
+
+/* =========================================================
+   Scrollbars
+   ========================================================= */
+
 .thin-scroll::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -126,11 +257,16 @@ body {
   background: transparent;
 }
 
+/* =========================================================
+   Toast
+   ========================================================= */
+
 @keyframes toast-in {
   from {
     opacity: 0;
     transform: translate(-50%, 8px);
   }
+
   to {
     opacity: 1;
     transform: translate(-50%, 0);

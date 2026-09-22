@@ -91,7 +91,7 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
       className={[
         'relative select-none overflow-visible border bg-[var(--paper)] text-left shadow-sm transition-shadow',
         selected
-          ? 'border-[var(--signal-accent)] ring-1 ring-[var(--signal-accent)]'
+          ? 'border-[var(--selected)] ring-1 ring-[var(--selected)]'
           : isConnectSource
             ? 'border-[var(--ink-900)] ring-1 ring-[var(--ink-900)]'
             : 'border-[var(--ink-400)] hover:border-[var(--ink-700)]',
@@ -100,12 +100,10 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-[var(--ink-900)]"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-[var(--ink-900)]"
       />
 
       <div className="overflow-hidden">
@@ -140,7 +138,9 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
               ? `Tampilkan ${childCount} simpul turunan`
               : `Sembunyikan ${childCount} simpul turunan agar canvas tidak penuh`
           }
-          className="absolute -bottom-[10px] left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--ink-400)] bg-[var(--paper)] px-1.5 py-0.5 font-technical text-[9.5px] font-medium text-[var(--ink-600)] shadow-sm hover:border-[var(--ink-800)] hover:text-[var(--ink-900)]"
+          // Sits beside the right-side connection handle (offset down a touch so it doesn't
+          // overlap the handle's hit area) instead of hanging off the bottom edge.
+          className="absolute -right-2 top-1/2 z-10 flex translate-x-full translate-y-3 items-center gap-1 rounded-full border border-[var(--ink-400)] bg-[var(--paper)] px-1.5 py-0.5 font-technical text-[9.5px] font-medium text-[var(--ink-600)] shadow-sm hover:border-[var(--ink-800)] hover:text-[var(--ink-900)]"
         >
           <span>{isCollapsed ? '▸' : '▾'}</span>
           <span>{childCount}</span>

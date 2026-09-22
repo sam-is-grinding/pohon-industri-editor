@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+
+:root {
+  --ink-950: #0a0a0b;
+  --ink-900: #131316;
+  --ink-800: #1d1d21;
+  --ink-700: #2b2b31;
+  --ink-600: #46464e;
+  --ink-500: #6b6b74;
+  --ink-400: #93939c;
+  --ink-300: #bdbdc4;
+  --ink-200: #dcdce0;
+  --ink-100: #eeeef0;
+  --ink-50: #f6f6f7;
+  --paper: #fbfbfa;
+
+  --signal-produced: #3d7a4f;
+  --signal-emerging: #2f5f8a;
+  --signal-critical: #b23b32;
+  --signal-import-gap: #a8781f;
+  --signal-accent: #c8481f;
+
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink-100);
+  color: var(--ink-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-technical {
+  font-family: var(--font-mono);
+}
+
+/* React Flow's own <Background> component (dots) now draws the grid, so it pans/zooms with
+   the canvas. This class just keeps React Flow's root transparent so the paper-colored
+   background and dashed stage guides underneath (see StageColumnGuides) stay visible. */
+.rf-transparent-bg,
+.rf-transparent-bg .react-flow__pane,
+.rf-transparent-bg .react-flow__viewport {
+  background: transparent;
+}
+
+/* React Flow chrome overrides for the monochrome/technical look */
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__controls {
+  box-shadow: none !important;
+  border: 1px solid var(--ink-300);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--paper) !important;
+  border-bottom: 1px solid var(--ink-200) !important;
+  color: var(--ink-800) !important;
+  width: 26px !important;
+  height: 26px !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--ink-100) !important;
+}
+
+.react-flow__minimap {
+  border: 1px solid var(--ink-300);
+  border-radius: 4px;
+  background: var(--paper) !important;
+}
+
+.react-flow__edge-path {
+  stroke: var(--ink-500);
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--signal-accent);
+  stroke-width: 2.5;
+}
+
+.react-flow__handle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 999px !important;
+  background: var(--ink-900) !important;
+  border: 2px solid var(--paper) !important;
+}
+
+.react-flow__handle:hover {
+  background: var(--signal-accent) !important;
+}
+
+/* thin custom scrollbars for panels */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--ink-300);
+  border-radius: 4px;
+}
+
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.toast-anim {
+  animation: toast-in 160ms ease-out;
+}

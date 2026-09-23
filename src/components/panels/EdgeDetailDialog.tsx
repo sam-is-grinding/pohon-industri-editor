@@ -29,9 +29,9 @@ export function EdgeDetailDialog({ edgeId, onClose }: Props) {
   const targetMaster = target ? getMasterNode(target.masterNodeId) : undefined
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-3" onClick={onClose}>
       <div
-        className="w-[380px] border border-[var(--ink-400)] bg-[var(--paper)] shadow-xl"
+        className="w-[380px] max-w-full border border-[var(--ink-400)] bg-[var(--paper)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-[var(--ink-200)] px-4 py-2.5">

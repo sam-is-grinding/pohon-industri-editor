@@ -214,15 +214,21 @@ body {
   background: transparent;
 }
 
-/* ---- Toast ---- */
+/* ---- Toast ----
+   Only opacity + a Y offset are animated here — deliberately NOT translateX/translate(-50%, ...).
+   Tailwind v4's translate-x utility sets the CSS `translate` property, while this keyframe sets
+   the (separate, and separately composited) `transform` property. Stacking a -50% X offset in
+   both used to double it up mid-animation (-100%) and then visibly snap back to -50% the instant
+   the animation ended and `transform` reverted. Keeping this keyframe X-free means the only X
+   offset ever in play is the constant one from `-translate-x-1/2`, so there's nothing to snap. */
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
   }
 }
 

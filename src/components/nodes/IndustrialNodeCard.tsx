@@ -16,6 +16,7 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
   const treeNode = useTreeStore((s) => s.treeNodes.find((n) => n.id === treeNodeId))
   const mode = useTreeStore((s) => s.mode)
   const connectSourceId = useTreeStore((s) => s.connectSourceId)
+  const multiSelectMode = useTreeStore((s) => s.multiSelectMode)
   const openDetail = useTreeStore((s) => s.openDetail)
   const selectNode = useTreeStore((s) => s.selectNode)
   const toggleNodeInSelection = useTreeStore((s) => s.toggleNodeInSelection)
@@ -53,13 +54,22 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
         }
         return
       }
-      if (e.shiftKey) {
+      if (e.shiftKey || multiSelectMode) {
         toggleNodeInSelection(treeNodeId)
         return
       }
       selectNode(treeNodeId)
     },
-    [mode, connectSourceId, treeNodeId, beginConnectFrom, requestConnection, selectNode, toggleNodeInSelection],
+    [
+      mode,
+      connectSourceId,
+      multiSelectMode,
+      treeNodeId,
+      beginConnectFrom,
+      requestConnection,
+      selectNode,
+      toggleNodeInSelection,
+    ],
   )
 
   const handleToggleCollapsed = useCallback(

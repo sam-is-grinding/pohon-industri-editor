@@ -76,6 +76,7 @@ export function CanvasEditor() {
   const edges = useTreeStore((s) => s.edges)
   const stages = useTreeStore((s) => s.stages)
   const mode = useTreeStore((s) => s.mode)
+  const multiSelectMode = useTreeStore((s) => s.multiSelectMode)
   const selectedNodeIds = useTreeStore((s) => s.selectedNodeIds)
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId)
   const collapsedNodeIds = useTreeStore((s) => s.collapsedNodeIds)
@@ -214,12 +215,17 @@ export function CanvasEditor() {
       connectDragSourceRef.current = null
       if (!sourceId) return
 
-      const target = event.target as HTMLElement | null
-      const droppedOnPane = !!target?.classList?.contains('react-flow__pane')
-      if (!droppedOnPane) return
-
       const clientX = 'clientX' in event ? event.clientX : event.changedTouches?.[0]?.clientX ?? 0
       const clientY = 'clientY' in event ? event.clientY : event.changedTouches?.[0]?.clientY ?? 0
+
+      // Ask the browser what's actually under the release point rather than trusting
+      // event.target: on touch devices, a touchend's target is always the element the touch
+      // *started* on (the drag handle), never the one under the finger when it lifted — so this
+      // always looked like "not the pane" on mobile even when the drag clearly ended on empty
+      // canvas. elementFromPoint gives the real answer for both mouse and touch.
+      const target = typeof document !== 'undefined' ? document.elementFromPoint(clientX, clientY) : null
+      const droppedOnPane = !!target?.classList?.contains('react-flow__pane')
+      if (!droppedOnPane) return
 
       const flowPosition = screenToFlowPosition({ x: clientX, y: clientY })
       const order = nearestStageOrder(flowPosition.x, sortedStages.length || 1)
@@ -404,6 +410,132 @@ export function CanvasEditor() {
     }
   }, [nodes, viewport, addNodesToSelection, setSelectedNodeIds])
 
+  // ---- Touch equivalent of the box-select above: press + hold + drag on empty canvas ----
+  // Touch has no right button, so this only arms while Multi-select mode is on (see Toolbar —
+  // its button is mobile-only) and canvas panning is disabled for the same duration (see
+  // panOnDrag on <ReactFlow /> below) so the hold-drag gesture isn't fighting the pan gesture.
+  const TOUCH_LONG_PRESS_MS = 380
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const touchHoldTimerRef = useRef<number | null>(null)
+  const touchBoxActiveRef = useRef(false)
+
+  useEffect(() => {
+    if (!multiSelectMode || mode === 'connect') return
+
+    function toLocal(clientX: number, clientY: number) {
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      if (!rect) return { x: clientX, y: clientY }
+      return { x: clientX - rect.left, y: clientY - rect.top }
+    }
+
+    function clearHoldTimer() {
+      if (touchHoldTimerRef.current !== null) {
+        window.clearTimeout(touchHoldTimerRef.current)
+        touchHoldTimerRef.current = null
+      }
+    }
+
+    function isOnInteractiveChrome(target: EventTarget | null) {
+      const el = target as HTMLElement | null
+      return !!el?.closest(
+        '.react-flow__node, .react-flow__handle, .react-flow__controls, .react-flow__minimap, button',
+      )
+    }
+
+    // function handleTouchStart(e: TouchEvent) {
+    //   if (e.touches.length !== 1 || isOnInteractiveChrome(e.target)) return
+    //   const touch = e.touches[0]
+    //   const { x, y } = toLocal(touch.clientX, touch.clientY)
+    //   touchStartRef.current = { x, y }
+    //   touchBoxActiveRef.current = false
+    //   clearHoldTimer()
+    //   touchHoldTimerRef.current = window.setTimeout(() => {
+    //     if (!touchStartRef.current) return
+    //     touchBoxActiveRef.current = true
+    //     setBoxSelect({ x1: touchStartRef.current.x, y1: touchStartRef.current.y, x2: touchStartRef.current.x, y2: touchStartRef.current.y })
+    //   }, TOUCH_LONG_PRESS_MS)
+    // }
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length !== 1 || isOnInteractiveChrome(e.target)) return
+
+      const touch = e.touches[0]
+      const { x, y } = toLocal(touch.clientX, touch.clientY)
+
+      touchStartRef.current = { x, y }
+      touchBoxActiveRef.current = true
+
+      setBoxSelect({
+        x1: x,
+        y1: y,
+        x2: x,
+        y2: y,
+      })
+    }
+
+    function handleTouchMove(e: TouchEvent) {
+      if (e.touches.length !== 1 || !touchStartRef.current) return
+      const touch = e.touches[0]
+      const { x, y } = toLocal(touch.clientX, touch.clientY)
+
+      if (!touchBoxActiveRef.current) {
+        // Finger moved before the hold armed — this is a scroll/pan attempt, not a select-drag.
+        if (Math.abs(x - touchStartRef.current.x) > BOX_SELECT_THRESHOLD_PX || Math.abs(y - touchStartRef.current.y) > BOX_SELECT_THRESHOLD_PX) {
+          clearHoldTimer()
+          touchStartRef.current = null
+        }
+        return
+      }
+
+      // Box-select drag is live — keep the canvas from panning/scrolling under the finger.
+      e.preventDefault()
+      setBoxSelect({ x1: touchStartRef.current.x, y1: touchStartRef.current.y, x2: x, y2: y })
+    }
+
+    function handleTouchEnd() {
+      clearHoldTimer()
+      const wasActive = touchBoxActiveRef.current
+      touchStartRef.current = null
+      touchBoxActiveRef.current = false
+      if (!wasActive) return
+
+      setBoxSelect((current) => {
+        if (!current) return null
+        const selRect = {
+          left: Math.min(current.x1, current.x2),
+          right: Math.max(current.x1, current.x2),
+          top: Math.min(current.y1, current.y2),
+          bottom: Math.max(current.y1, current.y2),
+        }
+        const hitIds = nodes
+          .filter((n) => {
+            const nx1 = n.position.x * viewport.zoom + viewport.x
+            const ny1 = n.position.y * viewport.zoom + viewport.y
+            const nx2 = nx1 + NODE_CARD_WIDTH * viewport.zoom
+            const ny2 = ny1 + NODE_CARD_HEIGHT * viewport.zoom
+            return nx1 < selRect.right && nx2 > selRect.left && ny1 < selRect.bottom && ny2 > selRect.top
+          })
+          .map((n) => n.id)
+        if (hitIds.length > 0) addNodesToSelection(hitIds)
+        return null
+      })
+    }
+
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+    wrapper.addEventListener('touchstart', handleTouchStart, { passive: true })
+    wrapper.addEventListener('touchmove', handleTouchMove, { passive: false })
+    wrapper.addEventListener('touchend', handleTouchEnd)
+    wrapper.addEventListener('touchcancel', handleTouchEnd)
+    return () => {
+      clearHoldTimer()
+      wrapper.removeEventListener('touchstart', handleTouchStart)
+      wrapper.removeEventListener('touchmove', handleTouchMove)
+      wrapper.removeEventListener('touchend', handleTouchEnd)
+      wrapper.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [multiSelectMode, mode, nodes, viewport, addNodesToSelection])
+
   const onWrapperMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 2) return
     const rect = wrapperRef.current?.getBoundingClientRect()
@@ -469,6 +601,10 @@ export function CanvasEditor() {
           onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
           onMove={onMove}
+          // Dragging on empty canvas is repurposed for touch box-select while Multi-select mode
+          // is on (see the touch handlers above), so plain drag-to-pan is turned off for that
+          // duration — pinch-zoom and the minimap still work for repositioning the view.
+          panOnDrag={!multiSelectMode}
           panOnScroll
           zoomOnScroll
           connectionRadius={connectionRadiusForZoom(viewport.zoom)}

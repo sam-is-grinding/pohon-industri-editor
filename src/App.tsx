@@ -80,7 +80,11 @@ export default function App() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-screen w-full flex-col bg-[var(--ink-100)]">
+      {/* h-dvh (not h-screen/100vh) so the layout matches the *actual* visible viewport on
+          mobile browsers, whose address/toolbar chrome makes 100vh taller than what's on
+          screen — with h-screen that gap is exactly what was pushing the bottom bar/Toast
+          out of view. */}
+      <div className="flex h-dvh w-full flex-col bg-[var(--ink-100)]">
         <Header />
         <Toolbar />
         <CanvasEditor />

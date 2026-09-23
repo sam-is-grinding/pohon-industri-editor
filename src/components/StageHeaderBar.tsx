@@ -82,7 +82,7 @@ export function StageHeaderBar({ translateX, zoom }: Props) {
                 )}
               </div>
 
-              <div className="absolute right-1 top-1 hidden items-center gap-0.5 group-hover:flex">
+              <div className="absolute right-1 top-1 flex items-center gap-0.5">
                 <button
                   disabled={idx === 0}
                   onClick={() => reorderStage(stage.id, -1)}

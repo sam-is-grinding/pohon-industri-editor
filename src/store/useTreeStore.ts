@@ -67,6 +67,10 @@ interface TreeStoreState {
   selectedNodeIds: string[]
   selectedEdgeId: string | null
   activeStageId: string | null
+  /** Touch/mobile-friendly stand-in for "hold Shift and click": while true, tapping a node
+   *  toggles it in the selection instead of opening/selecting it alone. Toggled from the
+   *  Toolbar (there's no reliable long-press-drag box-select on touch devices). */
+  multiSelectMode: boolean
 
   // ----- view preferences -----
   /** Node ids whose subtree is collapsed. Persisted, but intentionally excluded from undo/redo. */
@@ -100,6 +104,9 @@ interface TreeStoreState {
   setSelectedNodeIds: (ids: string[]) => void
   /** Adds ids to the current selection without clearing it (Shift + box select). */
   addNodesToSelection: (ids: string[]) => void
+  /** Turns multiSelectMode on/off. Turning it off also clears the current selection, mirroring
+   *  what releasing Shift + clicking empty canvas does on desktop. */
+  toggleMultiSelectMode: () => void
   selectEdge: (id: string | null) => void
   setActiveStage: (id: string | null) => void
 
@@ -206,6 +213,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   selectedNodeIds: [],
   selectedEdgeId: null,
   activeStageId: null,
+  multiSelectMode: false,
 
   collapsedNodeIds: [],
 
@@ -300,6 +308,12 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         selectedEdgeId: merged.length > 0 ? null : s.selectedEdgeId,
       }
     }),
+  toggleMultiSelectMode: () =>
+    set((s) =>
+      s.multiSelectMode
+        ? { multiSelectMode: false, selectedNodeIds: [], selectedNodeId: null }
+        : { multiSelectMode: true },
+    ),
   selectEdge: (id) =>
     set((s) => ({
       selectedEdgeId: id,

@@ -19,7 +19,7 @@ export function ValidationBar() {
 
   return (
     <div className="relative border-t border-[var(--ink-300)] bg-[var(--paper)] px-3 py-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={togglePanel}
           className="flex items-center gap-2 text-[12.5px]"
@@ -45,7 +45,9 @@ export function ValidationBar() {
           )}
         </button>
 
-        <div className="flex items-center gap-2">
+        {/* Full-width, evenly-split on mobile so the row fills edge-to-edge instead of leaving
+            dead space on the right; back to a normal right-aligned cluster from sm: up. */}
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:w-auto sm:items-center">
           <button
             onClick={discardChanges}
             className="border border-[var(--ink-300)] px-3 py-1.5 text-[12.5px] text-[var(--ink-700)] hover:border-[var(--ink-600)]"

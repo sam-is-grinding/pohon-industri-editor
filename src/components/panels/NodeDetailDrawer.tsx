@@ -49,17 +49,25 @@ export function NodeDetailDrawer() {
 
   // Centers on wherever the node was opened from (double-click, context menu, validation list —
   // see openDetail callers), clamped to stay fully on-screen, mirroring the Quick Add popover.
-  // Falls back to a near-top-right default when no position was given.
+  // Falls back to a near-top-right default when no position was given. On narrow phones the
+  // panel can be wider/taller than the screen itself — sizing it down to fit (instead of only
+  // clamping its position) is what keeps it centered instead of jammed against one edge with a
+  // lopsided gap on the other.
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : PANEL_WIDTH
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : PANEL_HEIGHT
+  const effectiveWidth = Math.min(PANEL_WIDTH, viewportWidth - 24)
+  const effectiveHeight = Math.min(PANEL_HEIGHT, viewportHeight - 24)
+
   const defaultLeft = detailPosition
-    ? Math.min(Math.max(detailPosition.screenX - PANEL_WIDTH / 2, 12), window.innerWidth - PANEL_WIDTH - 12)
-    : Math.max(window.innerWidth - PANEL_WIDTH - 24, 12)
+    ? Math.min(Math.max(detailPosition.screenX - effectiveWidth / 2, 12), viewportWidth - effectiveWidth - 12)
+    : Math.max(viewportWidth - effectiveWidth - 24, 12)
   const defaultTop = detailPosition
-    ? Math.min(Math.max(detailPosition.screenY - PANEL_HEIGHT / 2, 12), window.innerHeight - PANEL_HEIGHT - 12)
+    ? Math.min(Math.max(detailPosition.screenY - effectiveHeight / 2, 12), viewportHeight - effectiveHeight - 12)
     : 84
   const { left, top, onHeaderPointerDown, onHeaderPointerMove, onHeaderPointerUp } = useDraggablePosition(
     defaultLeft,
     defaultTop,
-    { width: PANEL_WIDTH, height: PANEL_HEIGHT },
+    { width: effectiveWidth, height: effectiveHeight },
     selectedNodeId,
   )
 
@@ -94,7 +102,7 @@ export function NodeDetailDrawer() {
   return (
     <div
       ref={ref}
-      style={{ left, top, width: PANEL_WIDTH, maxHeight: PANEL_HEIGHT }}
+      style={{ left, top, width: effectiveWidth, maxHeight: effectiveHeight }}
       className="fixed z-40 flex flex-col border border-[var(--ink-300)] bg-[var(--paper)] shadow-xl"
     >
       <div

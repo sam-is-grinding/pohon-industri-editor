@@ -14,7 +14,9 @@ export function Toast() {
   if (!toast) return null
 
   return (
-    <div className="toast-anim fixed bottom-16 left-1/2 z-[60] -translate-x-1/2 border border-[var(--ink-700)] bg-[var(--ink-900)] px-4 py-2 text-[12.5px] text-[var(--paper)] shadow-lg">
+    <div
+      className="toast-anim fixed left-1/2 z-[60] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 border border-[var(--ink-700)] bg-[var(--ink-900)] px-4 py-2 text-center text-[12.5px] text-[var(--paper)] shadow-lg bottom-[calc(6rem+env(safe-area-inset-bottom,0px))] sm:bottom-16"
+    >
       {toast}
     </div>
   )

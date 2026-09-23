@@ -85,15 +85,17 @@ export function QuickAddNodePopover({
     })
   }, [query, filter])
 
-  // Center the popup on the cursor, but clamp so it never runs off-screen.
-  const defaultLeft = Math.min(
-    Math.max(screenX - POPOVER_WIDTH / 2, 12),
-    (typeof window !== 'undefined' ? window.innerWidth : POPOVER_WIDTH) - POPOVER_WIDTH - 12,
-  )
-  const defaultTop = Math.min(
-    Math.max(screenY - POPOVER_HEIGHT / 2, 12),
-    (typeof window !== 'undefined' ? window.innerHeight : POPOVER_HEIGHT) - POPOVER_HEIGHT - 12,
-  )
+  // Center the popup on the cursor, but clamp so it never runs off-screen. On narrow phones the
+  // popover can be wider/taller than the screen itself — sizing it down to fit (instead of only
+  // clamping its position) is what keeps it centered instead of jammed against one edge with a
+  // lopsided gap on the other.
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : POPOVER_WIDTH
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : POPOVER_HEIGHT
+  const effectiveWidth = Math.min(POPOVER_WIDTH, viewportWidth - 24)
+  const effectiveHeight = Math.min(POPOVER_HEIGHT, viewportHeight - 24)
+
+  const defaultLeft = Math.min(Math.max(screenX - effectiveWidth / 2, 12), viewportWidth - effectiveWidth - 12)
+  const defaultTop = Math.min(Math.max(screenY - effectiveHeight / 2, 12), viewportHeight - effectiveHeight - 12)
   const left = dragPos?.left ?? defaultLeft
   const top = dragPos?.top ?? defaultTop
 
@@ -107,7 +109,7 @@ export function QuickAddNodePopover({
   function onHeaderPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const offset = dragOffsetRef.current
     if (!offset) return
-    const maxLeft = Math.max((typeof window !== 'undefined' ? window.innerWidth : POPOVER_WIDTH) - POPOVER_WIDTH - 8, 8)
+    const maxLeft = Math.max((typeof window !== 'undefined' ? window.innerWidth : effectiveWidth) - effectiveWidth - 8, 8)
     const maxTop = Math.max((typeof window !== 'undefined' ? window.innerHeight : 40) - 40, 8)
     setDragPos({
       left: Math.min(Math.max(e.clientX - offset.dx, 8), maxLeft),
@@ -135,7 +137,7 @@ export function QuickAddNodePopover({
   return (
     <div
       ref={ref}
-      style={{ left, top, width: POPOVER_WIDTH, maxHeight: POPOVER_HEIGHT }}
+      style={{ left, top, width: effectiveWidth, maxHeight: effectiveHeight }}
       className="fixed z-50 flex flex-col border border-[var(--ink-300)] bg-[var(--paper)] shadow-xl"
     >
       <div

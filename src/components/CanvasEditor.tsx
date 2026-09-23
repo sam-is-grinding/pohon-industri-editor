@@ -414,7 +414,7 @@ export function CanvasEditor() {
   // Touch has no right button, so this only arms while Multi-select mode is on (see Toolbar —
   // its button is mobile-only) and canvas panning is disabled for the same duration (see
   // panOnDrag on <ReactFlow /> below) so the hold-drag gesture isn't fighting the pan gesture.
-  const TOUCH_LONG_PRESS_MS = 380
+  // const TOUCH_LONG_PRESS_MS = 380
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const touchHoldTimerRef = useRef<number | null>(null)
   const touchBoxActiveRef = useRef(false)

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useTreeStore } from '../../store/useTreeStore'
 import { getMasterNode } from '../../data/masterCatalog'
 import { RELATION_LABEL } from '../../types'
@@ -11,6 +12,14 @@ export function EdgeDetailDialog({ edgeId, onClose }: Props) {
   const edge = useTreeStore((s) => s.edges.find((e) => e.id === edgeId))
   const treeNodes = useTreeStore((s) => s.treeNodes)
   const removeEdge = useTreeStore((s) => s.removeEdge)
+
+  useEffect(() => {
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleEsc)
+    return () => document.removeEventListener('keydown', handleEsc)
+  }, [onClose])
 
   if (!edge) return null
 

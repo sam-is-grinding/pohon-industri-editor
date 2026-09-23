@@ -33,6 +33,7 @@ export function Toolbar() {
   const redo = useTreeStore((s) => s.redo)
   const canUndo = useTreeStore((s) => s.past.length > 0)
   const canRedo = useTreeStore((s) => s.future.length > 0)
+  const connectSourceId = useTreeStore((s) => s.connectSourceId)
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--ink-300)] bg-[var(--paper)] px-3 py-2">
@@ -49,14 +50,15 @@ export function Toolbar() {
         <span className={canRedo ? '' : 'opacity-40'}>↷ Redo</span>
       </ToolbarButton>
 
-      <div className="font-technical ml-1 text-[10.5px] leading-tight text-[var(--ink-400)]">
-        Klik kanan + tahan + geser di canvas untuk multi-select · Delete untuk hapus yang dipilih
-      </div>
-
       <div className="ml-auto flex items-center gap-2">
         {mode === 'connect' && (
           <span className="font-technical text-[11px] text-[var(--ink-500)]">
-            Klik node tujuan untuk membuat relasi… (Esc untuk batal)
+            {connectSourceId ? 'Klik node tujuan…' : 'Klik node sumber…'}
+          </span>
+        )}
+        {mode !== 'connect' && (
+          <span className="font-technical text-[11px] text-[var(--ink-500)]">
+            Klik kanan + tahan + geser di canvas untuk multi-select · Delete untuk hapus yang dipilih
           </span>
         )}
       </div>

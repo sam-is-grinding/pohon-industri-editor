@@ -52,20 +52,16 @@ export function QuickAddNodePopover({
   const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
 
   useEffect(() => {
-    // Capture phase (and pointerdown, not click/mousedown) so this reliably fires even when a
-    // click lands on the canvas — React Flow's own pane handling can stop a bubbling
-    // mousedown/click before it ever reaches a bubble-phase listener on `document`. Capture
-    // always runs first, top-down, before anything downstream gets a chance to swallow it.
-    function handlePointerDown(e: PointerEvent) {
+    function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
     }
-    document.addEventListener('pointerdown', handlePointerDown, true)
+    document.addEventListener('mousedown', handleClick)
     document.addEventListener('keydown', handleEsc)
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true)
+      document.removeEventListener('mousedown', handleClick)
       document.removeEventListener('keydown', handleEsc)
     }
   }, [onClose])
@@ -124,7 +120,7 @@ export function QuickAddNodePopover({
   function pick(masterNodeId: string) {
     const newId = addNodeFromCatalog(masterNodeId, stageId, flowPosition)
     if (newId && connectFromId && connectFromId !== newId) {
-      requestConnection(connectFromId, newId)
+      requestConnection(connectFromId, newId, { x: screenX, y: screenY })
     }
     onClose()
   }
@@ -145,11 +141,7 @@ export function QuickAddNodePopover({
         <h2 className="font-technical text-[11.5px] font-semibold uppercase tracking-wide text-[var(--ink-900)]">
           {connectFromId ? 'Hubungkan ke Simpul Baru' : 'Tambah Simpul'}
         </h2>
-        <button
-          onClick={onClose}
-          aria-label="Tutup"
-          className="-mr-1 flex h-7 w-7 items-center justify-center rounded text-[20px] leading-none text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)]"
-        >
+        <button onClick={onClose} className="text-[15px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]">
           ×
         </button>
       </div>

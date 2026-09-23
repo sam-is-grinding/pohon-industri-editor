@@ -1,11 +1,10 @@
-import { memo, useCallback, useMemo } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { memo, useCallback, useEffect } from 'react'
+import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { getMasterNode } from '../../data/masterCatalog'
 import { useTreeStore } from '../../store/useTreeStore'
 import { statusDotClass } from '../../utils/statusStyle'
 import { STATUS_LABEL } from '../../types'
 import { NODE_CARD_HEIGHT, NODE_CARD_WIDTH } from '../../utils/layout'
-import { countDirectChildren } from '../../utils/visibility'
 
 export interface IndustrialNodeData {
   treeNodeId: string
@@ -22,13 +21,24 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
   const toggleNodeInSelection = useTreeStore((s) => s.toggleNodeInSelection)
   const beginConnectFrom = useTreeStore((s) => s.beginConnectFrom)
   const requestConnection = useTreeStore((s) => s.requestConnection)
-  const edges = useTreeStore((s) => s.edges)
+  const childCount = useTreeStore(
+    (s) => s.edges.filter((e) => e.source === treeNodeId && e.target !== treeNodeId).length,
+  )
   const isCollapsed = useTreeStore((s) => s.collapsedNodeIds.includes(treeNodeId))
-  const toggleNodeCollapse = useTreeStore((s) => s.toggleNodeCollapse)
+  const toggleNodeCollapsed = useTreeStore((s) => s.toggleNodeCollapsed)
 
   const master = treeNode ? getMasterNode(treeNode.masterNodeId) : undefined
 
-  const childCount = useMemo(() => countDirectChildren(treeNodeId, edges), [treeNodeId, edges])
+  // Handles are visually/hit-area rescaled to counter canvas zoom via the --handle-zoom-scale
+  // CSS var (see index.css + CanvasEditor), which changes the handle DOM element's effective
+  // size without React Flow's internal edge-anchor measurements knowing about it on their own.
+  // Forcing a re-measure whenever zoom changes keeps edges from visually "sticking" at a stale
+  // handle position after zooming.
+  const zoom = useStore((s) => s.transform[2])
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    updateNodeInternals(treeNodeId)
+  }, [zoom, treeNodeId, updateNodeInternals])
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -43,24 +53,21 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
         }
         return
       }
-      // Shift-click adds/removes this node from the current multi-selection (handy for
-      // building up a selection by hand alongside the right-click-drag rubber band); a plain
-      // click replaces the selection with just this node.
       if (e.shiftKey) {
         toggleNodeInSelection(treeNodeId)
-      } else {
-        selectNode(treeNodeId)
+        return
       }
+      selectNode(treeNodeId)
     },
-    [
-      mode,
-      connectSourceId,
-      treeNodeId,
-      beginConnectFrom,
-      requestConnection,
-      selectNode,
-      toggleNodeInSelection,
-    ],
+    [mode, connectSourceId, treeNodeId, beginConnectFrom, requestConnection, selectNode, toggleNodeInSelection],
+  )
+
+  const handleToggleCollapsed = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      toggleNodeCollapsed(treeNodeId)
+    },
+    [toggleNodeCollapsed, treeNodeId],
   )
 
   const handleDoubleClick = useCallback(
@@ -69,14 +76,6 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
       openDetail(treeNodeId)
     },
     [openDetail, treeNodeId],
-  )
-
-  const handleToggleCollapse = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      toggleNodeCollapse(treeNodeId)
-    },
-    [toggleNodeCollapse, treeNodeId],
   )
 
   if (!treeNode || !master) return null
@@ -89,7 +88,7 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
       onDoubleClick={handleDoubleClick}
       style={{ width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }}
       className={[
-        'relative select-none overflow-visible border bg-[var(--paper)] text-left shadow-sm transition-shadow',
+        'select-none border bg-[var(--paper)] text-left shadow-sm transition-shadow',
         selected
           ? 'border-[var(--selected)] ring-1 ring-[var(--selected)]'
           : isConnectSource
@@ -106,46 +105,40 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
         position={Position.Right}
       />
 
-      <div className="overflow-hidden">
-        <div className="flex items-center justify-between bg-[var(--ink-900)] px-2.5 py-1.5 text-[var(--paper)]">
-          <span className="font-technical text-[11px] tracking-wide">
-            <span className="opacity-60">▦</span> {treeNode.editorState.priority}
-          </span>
-          <span className="font-technical text-[11px] font-semibold">{master.score.toFixed(1)}</span>
-        </div>
+      <div className="flex items-center justify-between bg-[var(--ink-900)] px-2.5 py-1.5 text-[var(--paper)]">
+        <span className="font-technical text-[11px] tracking-wide">
+          <span className="opacity-60">▦</span> {treeNode.editorState.priority}
+        </span>
+        <span className="font-technical text-[11px] font-semibold">{master.score.toFixed(1)}</span>
+      </div>
 
-        <div className="px-2.5 py-2">
-          <div className="truncate text-[13px] font-semibold leading-snug text-[var(--ink-900)]">
-            {master.name}
-          </div>
-          <div className="mt-1 font-technical text-[10.5px] text-[var(--ink-500)]">
-            HS: {master.hsCode}
-          </div>
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(treeNode.editorState.status)}`} />
-            <span className="font-technical text-[10px] font-medium tracking-wide text-[var(--ink-600)]">
+      <div className="px-2.5 py-2">
+        <div className="truncate text-[13px] font-semibold leading-snug text-[var(--ink-900)]">
+          {master.name}
+        </div>
+        <div className="mt-1 font-technical text-[10.5px] text-[var(--ink-500)]">
+          HS: {master.hsCode}
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(treeNode.editorState.status)}`} />
+            <span className="truncate font-technical text-[10px] font-medium tracking-wide text-[var(--ink-600)]">
               {STATUS_LABEL[treeNode.editorState.status]}
             </span>
           </div>
+
+          {childCount > 0 && (
+            <button
+              onClick={handleToggleCollapsed}
+              title={isCollapsed ? `Expand ${childCount} turunan` : `Collapse ${childCount} turunan`}
+              className="flex shrink-0 items-center gap-0.5 border border-[var(--ink-300)] bg-[var(--ink-50)] px-1 py-[1px] font-technical text-[10px] font-semibold text-[var(--ink-600)] hover:border-[var(--ink-700)] hover:text-[var(--ink-900)]"
+            >
+              <span>{isCollapsed ? '▸' : '▾'}</span>
+              <span>{childCount}</span>
+            </button>
+          )}
         </div>
       </div>
-
-      {childCount > 0 && (
-        <button
-          onClick={handleToggleCollapse}
-          title={
-            isCollapsed
-              ? `Tampilkan ${childCount} simpul turunan`
-              : `Sembunyikan ${childCount} simpul turunan agar canvas tidak penuh`
-          }
-          // Sits beside the right-side connection handle (offset down a touch so it doesn't
-          // overlap the handle's hit area) instead of hanging off the bottom edge.
-          className="absolute -right-2 top-1/2 z-10 flex translate-x-full translate-y-3 items-center gap-1 rounded-full border border-[var(--ink-400)] bg-[var(--paper)] px-1.5 py-0.5 font-technical text-[9.5px] font-medium text-[var(--ink-600)] shadow-sm hover:border-[var(--ink-800)] hover:text-[var(--ink-900)]"
-        >
-          <span>{isCollapsed ? '▸' : '▾'}</span>
-          <span>{childCount}</span>
-        </button>
-      )}
     </div>
   )
 }

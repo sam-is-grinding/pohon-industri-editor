@@ -77,7 +77,7 @@ export interface IndustrialEdge {
 
 export type PublishStatus = 'draft' | 'published'
 
-export type EditorMode = 'select' | 'connect' | 'pan' | 'delete-relation'
+export type EditorMode = 'select' | 'connect'
 
 export interface ValidationIssue {
   id: string

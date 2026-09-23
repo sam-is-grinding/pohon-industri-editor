@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
-
 @import 'tailwindcss';
 
 :root {
@@ -14,7 +13,6 @@
   --ink-200: #dcdce0;
   --ink-100: #eeeef0;
   --ink-50: #f6f6f7;
-
   --paper: #fbfbfa;
 
   --signal-produced: #3d7a4f;
@@ -23,7 +21,15 @@
   --signal-import-gap: #a8781f;
   --signal-accent: #c8481f;
 
+  /* Selection color — kept distinct from --signal-accent (used for status/priority accents) so
+     "this is selected" reads as its own, unambiguous visual language across node rings, edge
+     strokes, the box-select rectangle, and handle hover. */
   --selected: #5b9df5;
+
+  /* Inverse-zoom scale applied to connection handles so their on-screen hit-area/visual size
+     stays constant regardless of canvas zoom. Set as an inline CSS var on the canvas wrapper
+     (see CanvasEditor) from 1 / viewport.zoom; falls back to 1 (no scaling) outside that wrapper. */
+  --handle-zoom-scale: 1;
 
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
@@ -52,20 +58,16 @@ body {
   font-family: var(--font-mono);
 }
 
-/* =========================================================
-   React Flow background
-   ========================================================= */
-
+/* React Flow's own <Background> component (dots) now draws the grid, so it pans/zooms with
+   the canvas. This class just keeps React Flow's root transparent so the paper-colored
+   background and dashed stage guides underneath (see StageColumnGuides) stay visible. */
 .rf-transparent-bg,
 .rf-transparent-bg .react-flow__pane,
 .rf-transparent-bg .react-flow__viewport {
   background: transparent;
 }
 
-/* =========================================================
-   React Flow chrome
-   ========================================================= */
-
+/* React Flow chrome overrides for the monochrome/technical look */
 .react-flow__attribution {
   display: none;
 }
@@ -95,10 +97,6 @@ body {
   background: var(--paper) !important;
 }
 
-/* =========================================================
-   Edges
-   ========================================================= */
-
 .react-flow__edge-path {
   stroke: var(--ink-500);
 }
@@ -108,141 +106,100 @@ body {
   stroke-width: 2.5;
 }
 
-/* =========================================================
-   HANDLE
-   =========================================================
-
-   Handle:
-   - 24x24 = invisible hit/click area
-   - ::before = dashed visual ring
-   - ::after = small visual dot
-
-   IMPORTANT:
-   No --handle-zoom-scale here.
-
-   Everything is defined in React Flow's canvas coordinate system,
-   so the entire handle naturally scales together with the node
-   when zooming in/out.
-   ========================================================= */
-
+/* ---- Connection handles ----
+   A 24x24px hit-area (base size below, before the inverse-zoom scale) with a dashed ring +
+   center dot, kept visually/interactively constant across zoom levels via --handle-zoom-scale
+   (see CanvasEditor, which sets it to 1/zoom on the canvas wrapper). We deliberately use two
+   classes together for the position-specific rules (e.g. `.react-flow__handle.react-flow__handle-left`)
+   so they reliably out-specificity React Flow's own single-class position rules regardless of
+   CSS import order, while still combining with (not replacing) that base translate. */
 .react-flow__handle {
-  width: 24px !important;
-  height: 24px !important;
-
-  border-radius: 999px !important;
-
+  /* Real layout size (not a CSS `transform: scale`) so React Flow's own measurement of this
+     element - which it uses to work out exactly where an edge/arrowhead should terminate -
+     matches what's actually on screen at every zoom level. React Flow reads this element's
+     *position* via getBoundingClientRect() (transform-aware) but its *size* via
+     offsetWidth/offsetHeight (transform-blind). Mixing a transformed position with an
+     untransformed size is what made the computed anchor drift away from the visual handle
+     at any zoom level other than exactly 100% - worst around the node center when zoomed in,
+     which is why the arrowhead stopped short of the handle. Giving the box its real,
+     zoom-compensated width/height here (instead of scaling it) keeps both measurements in
+     sync, so the anchor point is correct at any zoom.
+   */
+  width: calc(30px * var(--handle-zoom-scale, 1)) !important;
+  height: calc(30px * var(--handle-zoom-scale, 1)) !important;
   background: transparent !important;
   border: none !important;
-
-  cursor: crosshair;
+  border-radius: 999px !important;
 }
-
-/* Visual layers */
-
-.react-flow__handle::before,
-.react-flow__handle::after {
-  content: '';
-
-  position: absolute;
-
-  top: 50%;
-  left: 50%;
-
-  transform: translate(-50%, -50%);
-
-  pointer-events: none;
-
-  border-radius: 999px;
-
-  box-sizing: border-box;
-}
-
-/* =========================================================
-   DASHED RING
-   =========================================================
-
-   Dynamic with React Flow zoom.
-   It is NOT compensated with inverse zoom.
-   ========================================================= */
 
 .react-flow__handle::before {
+  content: '';
+  position: absolute;
+  /* Fixed base size (NOT `inset`, which would measure against the parent's now-variable
+     box above and double-apply the zoom compensation - that's what made the ring balloon
+     when zoomed out and shrink when zoomed in). Centered independently of the parent's
+     size via top/left + translate, then counter-scaled the same way the parent used to be,
+     so it reads as a constant 24px on screen regardless of zoom. */
+  top: 50%;
+  left: 50%;
   width: 24px;
   height: 24px;
-
-  border: 1.25px dashed var(--ink-400);
-
-  opacity: 0.55;
-
-  transition:
-    opacity 120ms ease,
-    border-color 120ms ease,
-    border-style 120ms ease;
+  border-radius: 999px;
+  border: 1.5px dashed var(--ink-400);
+  transform: translate(-50%, -50%) scale(var(--handle-zoom-scale, 1));
+  transition: border-color 120ms ease, transform 120ms ease, width 120ms ease, height 120ms ease;
 }
-
-/* =========================================================
-   CENTER DOT
-   =========================================================
-
-   Small visual marker.
-
-   Because there is no --handle-zoom-scale,
-   this naturally scales together with the canvas/node.
-   ========================================================= */
 
 .react-flow__handle::after {
-  width: 5px;
-  height: 5px;
-
-  background: var(--ink-500);
-
-  transition:
-    background 120ms ease,
-    width 120ms ease,
-    height 120ms ease,
-    border-radius 120ms ease;
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ink-900);
+  transform: translate(-50%, -50%) scale(var(--handle-zoom-scale, 1));
+  transition: background 120ms ease, transform 120ms ease;
 }
 
-/* =========================================================
-   HANDLE HOVER / CONNECTING
-   ========================================================= */
-
-.react-flow__handle:hover::before,
-.react-flow__handle.connectingfrom::before {
+.react-flow__handle:hover::before {
   border-color: var(--selected);
-  border-style: solid;
-  opacity: 0.9;
+  width: 28px;
+  height: 28px;
 }
 
-/* =========================================================
-   PLUS ICON ON HOVER
-   =========================================================
-
-   Also follows canvas zoom naturally.
-   ========================================================= */
-
-.react-flow__handle:hover::after,
-.react-flow__handle.connectingfrom::after {
-  width: 10px;
-  height: 10px;
-
-  background:
-    linear-gradient(
-      var(--selected),
-      var(--selected)
-    ) center / 100% 2px no-repeat,
-
-    linear-gradient(
-      var(--selected),
-      var(--selected)
-    ) center / 2px 100% no-repeat;
-
-  border-radius: 0;
+.react-flow__handle:hover::after {
+  background: var(--selected);
+  transform: translate(-50%, -50%) scale(var(--handle-zoom-scale, 1)) scale(1.3);
 }
 
-/* =========================================================
-   Scrollbars
-   ========================================================= */
+.react-flow__handle.react-flow__handle-bottom {
+  top: auto !important;
+  left: 50% !important;
+  bottom: 0 !important;
+  transform: translate(-50%, 50%) !important;
+}
 
+.react-flow__handle.react-flow__handle-top {
+  top: 0 !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow__handle.react-flow__handle-left {
+  top: 50% !important;
+  left: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow__handle.react-flow__handle-right {
+  top: 50% !important;
+  right: 0 !important;
+  transform: translate(50%, -50%) !important;
+}
+
+/* thin custom scrollbars for panels */
 .thin-scroll::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -257,16 +214,12 @@ body {
   background: transparent;
 }
 
-/* =========================================================
-   Toast
-   ========================================================= */
-
+/* ---- Toast ---- */
 @keyframes toast-in {
   from {
     opacity: 0;
     transform: translate(-50%, 8px);
   }
-
   to {
     opacity: 1;
     transform: translate(-50%, 0);

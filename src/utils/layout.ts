@@ -8,6 +8,28 @@ export const NODE_CARD_HEIGHT = 98
 export const NODE_CARD_MIN_HEIGHT = NODE_CARD_HEIGHT
 export const NODE_ROW_HEIGHT = 150
 
+/**
+ * On-screen size (px) we want connection handles' hit-area and dashed ring to occupy,
+ * regardless of canvas zoom level. Used both for the CSS inverse-zoom scale
+ * (--handle-zoom-scale) and for React Flow's `connectionRadius`, via the same formula:
+ * value-in-flow-units * zoom * (1 / zoom) === value-in-flow-units, i.e. always this constant
+ * on screen. Keeping one shared constant keeps the visual size and the "kena/tidak kena"
+ * snapping tolerance consistent with each other at every zoom level.
+ */
+export const HANDLE_HIT_AREA_PX = 24
+
+/** Inverse-zoom scale factor to counter the canvas viewport's own zoom transform. */
+export function handleZoomScale(zoom: number): number {
+  if (!zoom || Number.isNaN(zoom)) return 1
+  return 1 / zoom
+}
+
+/** Flow-space connection radius that resolves to a constant on-screen tolerance at any zoom. */
+export function connectionRadiusForZoom(zoom: number): number {
+  if (!zoom || Number.isNaN(zoom)) return HANDLE_HIT_AREA_PX
+  return HANDLE_HIT_AREA_PX / zoom
+}
+
 /** X position (canvas coords) of the left edge of a stage column, by stage order. */
 export function stageColumnX(order: number): number {
   return order * STAGE_COLUMN_WIDTH

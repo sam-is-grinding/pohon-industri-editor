@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTreeStore } from '../../store/useTreeStore'
 import { getMasterNode } from '../../data/masterCatalog'
 import { NODE_TYPE_LABEL, type NodeStatus, type Priority } from '../../types'
 import { statusColor } from '../../utils/statusStyle'
+import { useDraggablePosition } from '../../utils/useDraggablePosition'
 
 const PRIORITIES: Priority[] = ['P1', 'P2', 'P3', 'P4']
 const STATUSES: NodeStatus[] = ['produced', 'emerging', 'critical', 'import_gap']
 
-const PANEL_WIDTH = 420
-const PANEL_MAX_HEIGHT_VH = 85
+const PANEL_WIDTH = 360
+const PANEL_HEIGHT = 560
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -45,35 +46,25 @@ export function NodeDetailDrawer() {
 
   const ref = useRef<HTMLDivElement>(null)
 
-  // Same "drag the header, pin wherever it's dropped" behavior as QuickAddNodePopover, so the
-  // two floating panels in this app behave consistently.
-  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
-  const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
+  // Floats near the top-right by default (roughly where the fixed drawer used to live), but can
+  // be dragged anywhere; resets there whenever a different node's detail is opened.
+  const defaultLeft = Math.max(window.innerWidth - PANEL_WIDTH - 24, 12)
+  const defaultTop = 84
+  const { left, top, onHeaderPointerDown, onHeaderPointerMove, onHeaderPointerUp } = useDraggablePosition(
+    defaultLeft,
+    defaultTop,
+    { width: PANEL_WIDTH, height: PANEL_HEIGHT },
+    selectedNodeId,
+  )
 
   useEffect(() => {
     if (!isOpen) return
-    // Capture phase + pointerdown (not click/mousedown) so this reliably closes the panel even
-    // when the outside click lands on the React Flow canvas, which can stop a bubbling event
-    // before it reaches a bubble-phase listener on `document`.
-    function handlePointerDown(e: PointerEvent) {
+    function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) close()
     }
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') close()
-    }
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true)
-      document.removeEventListener('keydown', handleEsc)
-    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
   }, [isOpen, close])
-
-  // Reset to the default centered position each time a *different* node is opened, but keep
-  // wherever the user dragged it to while it stays open on the same node.
-  useEffect(() => {
-    setDragPos(null)
-  }, [selectedNodeId])
 
   if (!isOpen || !selectedNodeId || !treeNode) return null
 
@@ -81,40 +72,6 @@ export function NodeDetailDrawer() {
   if (!master) return null
 
   const stage = stages.find((s) => s.id === treeNode.stageId)
-
-  const defaultLeft =
-    (typeof window !== 'undefined' ? window.innerWidth : PANEL_WIDTH) / 2 - PANEL_WIDTH / 2
-  const defaultTop =
-    (typeof window !== 'undefined' ? window.innerHeight : 600) *
-      ((100 - PANEL_MAX_HEIGHT_VH) / 2 / 100)
-  const left = dragPos?.left ?? defaultLeft
-  const top = dragPos?.top ?? defaultTop
-
-  function onHeaderPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if ((e.target as HTMLElement).closest('button')) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    dragOffsetRef.current = { dx: e.clientX - left, dy: e.clientY - top }
-  }
-
-  function onHeaderPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    const offset = dragOffsetRef.current
-    if (!offset) return
-    const maxLeft = Math.max((typeof window !== 'undefined' ? window.innerWidth : PANEL_WIDTH) - PANEL_WIDTH - 8, 8)
-    const maxTop = Math.max((typeof window !== 'undefined' ? window.innerHeight : 40) - 40, 8)
-    setDragPos({
-      left: Math.min(Math.max(e.clientX - offset.dx, 8), maxLeft),
-      top: Math.min(Math.max(e.clientY - offset.dy, 8), maxTop),
-    })
-  }
-
-  function onHeaderPointerUp(e: React.PointerEvent<HTMLDivElement>) {
-    dragOffsetRef.current = null
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId)
-    } catch {
-      // pointer capture may already be released — safe to ignore
-    }
-  }
 
   const incoming = edges
     .filter((e) => e.target === treeNode.id)
@@ -128,8 +85,8 @@ export function NodeDetailDrawer() {
   return (
     <div
       ref={ref}
-      style={{ left, top, width: PANEL_WIDTH, maxHeight: `${PANEL_MAX_HEIGHT_VH}vh` }}
-      className="fixed z-40 flex flex-col border border-[var(--ink-400)] bg-[var(--paper)] shadow-xl"
+      style={{ left, top, width: PANEL_WIDTH, maxHeight: PANEL_HEIGHT }}
+      className="fixed z-40 flex flex-col border border-[var(--ink-300)] bg-[var(--paper)] shadow-xl"
     >
       <div
         onPointerDown={onHeaderPointerDown}
@@ -141,16 +98,12 @@ export function NodeDetailDrawer() {
         <h2 className="font-technical text-[12px] font-semibold uppercase tracking-wide text-[var(--ink-900)]">
           Node Detail
         </h2>
-        <button
-          onClick={close}
-          aria-label="Tutup"
-          className="-mr-1.5 flex h-8 w-8 items-center justify-center rounded text-[20px] leading-none text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)]"
-        >
+        <button onClick={close} className="text-[16px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]">
           ×
         </button>
       </div>
 
-        <div className="thin-scroll flex-1 overflow-y-auto px-4 py-4">
+      <div className="thin-scroll flex-1 overflow-y-auto px-4 py-4">
           <div className="mb-1 flex items-center gap-2">
             <span
               className="h-2 w-2 rounded-full"

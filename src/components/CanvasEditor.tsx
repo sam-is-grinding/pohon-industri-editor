@@ -6,7 +6,6 @@ import {
   Controls,
   MiniMap,
   useReactFlow,
-  useUpdateNodeInternals,
   applyNodeChanges,
   type Node,
   type NodeChange,
@@ -29,19 +28,17 @@ import { NodeContextMenu } from './panels/NodeContextMenu'
 import { ChangeStagePopover } from './panels/ChangeStagePopover'
 import { EdgeDetailDialog } from './panels/EdgeDetailDialog'
 import { QuickAddNodePopover } from './panels/QuickAddNodePopover'
-import { computeHiddenNodeIds } from '../utils/visibility'
 import {
+  connectionRadiusForZoom,
+  handleZoomScale,
   nearestStageOrder,
   NODE_CARD_HEIGHT,
   NODE_CARD_WIDTH,
   STAGE_COLUMN_WIDTH,
 } from '../utils/layout'
+import { computeHiddenNodeIds } from '../utils/visibility'
 
 const nodeTypes = { industrial: IndustrialNodeCard }
-
-// How far (in screen px) the right mouse button has to travel, past its mousedown point, before
-// we treat the gesture as "hold + drag" (rubber-band select) instead of a plain right-click.
-const RIGHT_DRAG_THRESHOLD = 5
 
 interface ContextMenuState {
   treeNodeId: string
@@ -58,74 +55,63 @@ interface QuickAddState {
   connectFromId?: string | null
 }
 
-/** In-flight right-button drag gesture, tracked imperatively (not React state) so we don't
- *  re-subscribe window listeners on every pointer move. */
-interface RightDragGesture {
-  pointerId: number
-  startX: number
-  startY: number
-  additive: boolean
-  baseSelection: string[]
-  moved: boolean
+/** Rubber-band box-select rectangle, in coordinates local to the canvas wrapper (screen px). */
+interface BoxSelectRect {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
 }
 
-/** Screen-space rectangle currently being rubber-banded, only set once movement passes the
- *  threshold — this is what actually renders the dashed selection box. */
-interface BoxSelectVisual {
-  startClientX: number
-  startClientY: number
-  curClientX: number
-  curClientY: number
-}
+const BOX_SELECT_THRESHOLD_PX = 4
 
 export function CanvasEditor() {
   const treeNodes = useTreeStore((s) => s.treeNodes)
   const edges = useTreeStore((s) => s.edges)
   const stages = useTreeStore((s) => s.stages)
   const mode = useTreeStore((s) => s.mode)
-  const setMode = useTreeStore((s) => s.setMode)
   const selectedNodeIds = useTreeStore((s) => s.selectedNodeIds)
   const selectedEdgeId = useTreeStore((s) => s.selectedEdgeId)
   const collapsedNodeIds = useTreeStore((s) => s.collapsedNodeIds)
-  const selectNodes = useTreeStore((s) => s.selectNodes)
+  const selectNode = useTreeStore((s) => s.selectNode)
+  const setSelectedNodeIds = useTreeStore((s) => s.setSelectedNodeIds)
+  const addNodesToSelection = useTreeStore((s) => s.addNodesToSelection)
   const selectEdge = useTreeStore((s) => s.selectEdge)
+  const dropTreeNode = useTreeStore((s) => s.dropTreeNode)
   const dropTreeNodes = useTreeStore((s) => s.dropTreeNodes)
   const requestConnection = useTreeStore((s) => s.requestConnection)
-  const removeSelectedNodes = useTreeStore((s) => s.removeSelectedNodes)
-  const removeSelectedEdge = useTreeStore((s) => s.removeSelectedEdge)
-  const undo = useTreeStore((s) => s.undo)
-  const redo = useTreeStore((s) => s.redo)
 
   const { screenToFlowPosition } = useReactFlow()
-  const updateNodeInternals = useUpdateNodeInternals()
 
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [stagePopover, setStagePopover] = useState<ContextMenuState | null>(null)
   const [openEdgeId, setOpenEdgeId] = useState<string | null>(null)
   const [quickAdd, setQuickAdd] = useState<QuickAddState | null>(null)
-  const [boxSelectVisual, setBoxSelectVisual] = useState<BoxSelectVisual | null>(null)
-
-  const canvasWrapperRef = useRef<HTMLDivElement>(null)
+  const [boxSelect, setBoxSelect] = useState<BoxSelectRect | null>(null)
 
   // Tracks the node a connection-drag started from, so we can offer "add node" if it's
   // dropped on empty canvas instead of on another node's handle.
   const connectDragSourceRef = useRef<string | null>(null)
 
-  // Last known pointer position anywhere on screen — cheap to keep updated continuously, and
-  // used to seed the Create Relationship popover's position when a connection is completed by
-  // dragging from a handle (onConnect itself gets no event/position from React Flow).
+  // Right-click + hold + drag on the canvas = rubber-band box select (see the mousedown/move/up
+  // listeners below). A plain right-click (no meaningful movement) still falls through to the
+  // normal pane/node context menu instead.
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const rightDownRef = useRef<{ x: number; y: number; shift: boolean } | null>(null)
+  const boxDraggingRef = useRef(false)
+  const suppressContextMenuOpenRef = useRef(false)
+  // Latest pointer position (screen px), kept up to date on every mousemove so drag-to-connect
+  // (React Flow's onConnect, which carries no position of its own) can float the Create
+  // Relationship popover at the point the connection was actually made.
   const lastPointerRef = useRef({ x: 0, y: 0 })
-
-  // The in-progress right-click-hold-drag gesture (null when the right button isn't down).
-  const rightDragRef = useRef<RightDragGesture | null>(null)
 
   const sortedStages = useMemo(() => [...stages].sort((a, b) => a.order - b.order), [stages])
 
-  // Nodes hidden because an ancestor is collapsed (see utils/visibility) — recomputed only when
-  // the graph or the collapsed set actually changes.
+  // Nodes hidden by a collapsed ancestor (see utils/visibility) — recomputed only when the
+  // underlying tree/collapse state actually changes.
   const hiddenNodeIds = useMemo(
-    () => computeHiddenNodeIds(treeNodes, edges, collapsedNodeIds),
+    () => computeHiddenNodeIds(treeNodes, edges, new Set(collapsedNodeIds)),
     [treeNodes, edges, collapsedNodeIds],
   )
 
@@ -151,6 +137,9 @@ export function CanvasEditor() {
             width: NODE_CARD_WIDTH,
             height: NODE_CARD_HEIGHT,
             data: { treeNodeId: tn.id } satisfies IndustrialNodeData,
+            // Driving React Flow's own multi-selection state (rather than just our own ring
+            // styling) is what makes its built-in "drag one selected node, all selected nodes
+            // move together" behavior kick in for free.
             selected: selectedNodeIds.includes(tn.id),
             draggable: mode !== 'connect',
             // Free-roaming horizontally: the node can be dragged across any stage column.
@@ -167,20 +156,11 @@ export function CanvasEditor() {
   // separate piece of state fed manually from onNodeDrag) keeps nodes and their connected edges
   // reading from the exact same, single, in-sync array on every frame — which is what stops the
   // relationship lines from lagging/flickering behind the node while it's being dragged.
-  //
-  // It's also the source of truth for hit-testing the right-click-drag selection rectangle
-  // (kept in a ref so the window pointer listeners below don't need to resubscribe on every
-  // render just because a drag moved something).
   const [nodes, setNodes] = useState<Node[]>(storeNodes)
-  const nodesRef = useRef<Node[]>(nodes)
 
   useEffect(() => {
     setNodes(storeNodes)
   }, [storeNodes])
-
-  useEffect(() => {
-    nodesRef.current = nodes
-  }, [nodes])
 
   // Only let position/dimension changes (the ones driving drag + minimap accuracy) flow into
   // local state here — selection stays fully controlled by the store via `storeNodes` above,
@@ -252,16 +232,21 @@ export function CanvasEditor() {
     [screenToFlowPosition, sortedStages],
   )
 
-  // Fires for both a solo drag and a multi-node group drag — React Flow always hands back the
-  // full list of nodes that were actually dragged (everything selected, plus the one grabbed),
-  // so this one handler covers "drag one node" and "drag the whole multi-selection together"
-  // without needing to special-case either.
   const onNodeDragStop: OnNodeDrag = useCallback(
-    (_event, node, draggedNodes) => {
-      const list = draggedNodes && draggedNodes.length > 0 ? draggedNodes : [node]
-      dropTreeNodes(list.map((n) => ({ id: n.id, position: { x: n.position.x, y: n.position.y } })))
+    (_event, node) => {
+      // If several nodes are selected and the one being dragged is among them, React Flow has
+      // already moved all of them together (see `selected` on storeNodes above) — commit that as
+      // one bulk drop/undo step instead of treating it as a single-node move.
+      if (selectedNodeIds.length > 1 && selectedNodeIds.includes(node.id)) {
+        const moves = nodes
+          .filter((n) => selectedNodeIds.includes(n.id))
+          .map((n) => ({ treeNodeId: n.id, position: { x: n.position.x, y: n.position.y } }))
+        dropTreeNodes(moves)
+        return
+      }
+      dropTreeNode(node.id, { x: node.position.x, y: node.position.y })
     },
-    [dropTreeNodes],
+    [dropTreeNode, dropTreeNodes, selectedNodeIds, nodes],
   )
 
   const onNodeClick: NodeMouseHandler = useCallback(() => {
@@ -282,294 +267,169 @@ export function CanvasEditor() {
   }, [])
 
   const onPaneClick = useCallback(() => {
-    selectNodes([])
+    selectNode(null)
     selectEdge(null)
     setContextMenu(null)
     setStagePopover(null)
-    if (mode === 'connect') setMode('pan')
-  }, [selectNodes, selectEdge, mode, setMode])
+  }, [selectNode, selectEdge])
 
-  // Handles are scaled inversely with zoom (see --handle-zoom-scale / .react-flow__handle in
-  // index.css) so their ON-SCREEN size stays constant regardless of zoom. The side effect: their
-  // flow-space box size literally changes every time zoom changes. React Flow only recomputes a
-  // node's handle anchor points (which is what edges attach to) when it's explicitly told that
-  // node's internals changed — it has no way to know our CSS just resized a handle purely
-  // because the viewport zoomed. Without telling it, an edge keeps pointing at the handle's
-  // stale pre-zoom anchor until something else (e.g. dragging the node) happens to force a
-  // remeasure — exactly the "edge stays offset at the old size until you nudge the node" bug.
-  // So: whenever zoom actually changes, explicitly ask React Flow to remeasure every node.
-  const lastZoomRef = useRef(viewport.zoom)
-  const onMove = useCallback(
-    (_: unknown, vp: Viewport) => {
-      setViewport(vp)
-      if (vp.zoom !== lastZoomRef.current) {
-        lastZoomRef.current = vp.zoom
-        updateNodeInternals(nodesRef.current.map((n) => n.id))
+  const onPaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault()
+      // A right-click that turned into a box-select drag shouldn't also pop the "add node" menu.
+      if (suppressContextMenuOpenRef.current) {
+        suppressContextMenuOpenRef.current = false
+        return
       }
+      setContextMenu(null)
+      setStagePopover(null)
+
+      if (sortedStages.length === 0) return
+      const flowPosition = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const order = nearestStageOrder(flowPosition.x, sortedStages.length)
+      const stage = sortedStages[order]
+      if (!stage) return
+
+      setQuickAdd({
+        screenX: e.clientX,
+        screenY: e.clientY,
+        flowPosition: { x: flowPosition.x, y: flowPosition.y - 40 },
+        stageId: stage.id,
+        stageLabel: `${stage.code} — ${stage.name}`,
+        connectFromId: null,
+      })
     },
-    [updateNodeInternals],
+    [screenToFlowPosition, sortedStages],
   )
 
-  // ---------------------------------------------------------------------------------------
-  // Right-click + hold + drag => rubber-band multi-select.
-  //
-  // Prevention of the native browser menu is delegated to React Flow's own onPaneContextMenu /
-  // onNodeContextMenu props below — NOT a hand-rolled capture listener on a wrapper div. That
-  // custom-capture approach used to live here and reliably leaked the native menu through on
-  // real-world testing; React Flow attaches these two callbacks directly to the actual pane/node
-  // DOM elements itself, and calling preventDefault() from inside them is what the earlier,
-  // simpler version of this app relied on and never had this problem — so we go back to that
-  // as the actual suppression mechanism, and only use it purely to preventDefault (no popup
-  // logic in here), because at the moment `contextmenu` fires we don't yet know if this is going
-  // to turn into a drag (mousemove/up haven't happened yet). What a right-click gesture actually
-  // resolves to (open the node menu / open quick-add / do nothing because it was a drag) is
-  // decided once the gesture is over, in handlePointerUp below, exactly as before.
-  // ---------------------------------------------------------------------------------------
-  const sortedStagesRef = useRef(sortedStages)
-  useEffect(() => {
-    sortedStagesRef.current = sortedStages
-  }, [sortedStages])
-
-  const screenToFlowPositionRef = useRef(screenToFlowPosition)
-  useEffect(() => {
-    screenToFlowPositionRef.current = screenToFlowPosition
-  }, [screenToFlowPosition])
-
-  const resolveRightClickRef = useRef<(clientX: number, clientY: number) => void>(() => { })
-  resolveRightClickRef.current = (clientX, clientY) => {
-    const nodeEl = document.elementFromPoint(clientX, clientY)?.closest('.react-flow__node')
-    const nodeId = nodeEl?.getAttribute('data-id')
-    if (nodeId) {
-      setQuickAdd(null)
-      setStagePopover(null)
-      setContextMenu({ treeNodeId: nodeId, x: clientX, y: clientY })
+  const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    e.preventDefault()
+    if (suppressContextMenuOpenRef.current) {
+      suppressContextMenuOpenRef.current = false
       return
     }
+    setQuickAdd(null)
+    setContextMenu({ treeNodeId: node.id, x: e.clientX, y: e.clientY })
+  }, [])
 
-    setContextMenu(null)
-    setStagePopover(null)
-
-    const stages_ = sortedStagesRef.current
-    if (stages_.length === 0) return
-    const flowPosition = screenToFlowPositionRef.current({ x: clientX, y: clientY })
-    const order = nearestStageOrder(flowPosition.x, stages_.length)
-    const stage = stages_[order]
-    if (!stage) return
-
-    setQuickAdd({
-      screenX: clientX,
-      screenY: clientY,
-      flowPosition: { x: flowPosition.x, y: flowPosition.y - 40 },
-      stageId: stage.id,
-      stageLabel: `${stage.code} — ${stage.name}`,
-      connectFromId: null,
-    })
-  }
-
+  // ---- Rubber-band box select: right-click + hold + drag on the canvas ----
+  // Layered on top of (not instead of) the pane/node context menus above: a plain right-click
+  // (no real movement) still opens the usual menu; only once the pointer has moved past the
+  // threshold do we switch into box-select and suppress that upcoming context menu.
   useEffect(() => {
-    function handlePointerMove(e: PointerEvent) {
+    function toLocal(clientX: number, clientY: number) {
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      if (!rect) return { x: clientX, y: clientY }
+      return { x: clientX - rect.left, y: clientY - rect.top }
+    }
+
+    function handleWindowMouseMove(e: MouseEvent) {
       lastPointerRef.current = { x: e.clientX, y: e.clientY }
 
-      const gesture = rightDragRef.current
-      if (!gesture || e.pointerId !== gesture.pointerId) return
-
-      if (!gesture.moved) {
-        const dx = e.clientX - gesture.startX
-        const dy = e.clientY - gesture.startY
-        if (Math.hypot(dx, dy) < RIGHT_DRAG_THRESHOLD) return
-        gesture.moved = true
-      }
-
-      setBoxSelectVisual({
-        startClientX: gesture.startX,
-        startClientY: gesture.startY,
-        curClientX: e.clientX,
-        curClientY: e.clientY,
-      })
-
-      const p1 = screenToFlowPosition({ x: gesture.startX, y: gesture.startY })
-      const p2 = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const minX = Math.min(p1.x, p2.x)
-      const maxX = Math.max(p1.x, p2.x)
-      const minY = Math.min(p1.y, p2.y)
-      const maxY = Math.max(p1.y, p2.y)
-
-      const overlappingIds = nodesRef.current
-        .filter((n) => {
-          const x1 = n.position.x
-          const y1 = n.position.y
-          const x2 = x1 + (n.width ?? NODE_CARD_WIDTH)
-          const y2 = y1 + (n.height ?? NODE_CARD_HEIGHT)
-          return x1 <= maxX && x2 >= minX && y1 <= maxY && y2 >= minY
-        })
-        .map((n) => n.id)
-
-      const finalIds = gesture.additive
-        ? Array.from(new Set([...gesture.baseSelection, ...overlappingIds]))
-        : overlappingIds
-
-      selectNodes(finalIds)
-    }
-
-    function handlePointerUp(e: PointerEvent) {
-      const gesture = rightDragRef.current
-      if (!gesture || e.pointerId !== gesture.pointerId) return
-      rightDragRef.current = null
-      setBoxSelectVisual(null)
-      if (!gesture.moved) {
-        // No real drag happened — treat it as a plain right-click (the native contextmenu
-        // event for it was already swallowed via onPaneContextMenu/onNodeContextMenu) and
-        // resolve it ourselves instead.
-        resolveRightClickRef.current(e.clientX, e.clientY)
-      }
-    }
-
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', handlePointerUp)
-    window.addEventListener('pointercancel', handlePointerUp)
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('pointercancel', handlePointerUp)
-    }
-  }, [screenToFlowPosition, selectNodes])
-
-  const onCanvasPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (e.button !== 2) return
-
-      e.preventDefault()
-
-      rightDragRef.current = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        additive: e.shiftKey,
-        baseSelection: selectedNodeIds,
-        moved: false,
-      }
-    },
-    [selectedNodeIds],
-  )
-
-  // Chromium/Firefox/Safari all fire `contextmenu` before we can know whether the gesture will
-  // turn into a drag, so these two just swallow the native menu immediately and unconditionally
-  // — same as the previous, reliable version of this app. They don't decide what to show; that
-  // happens in handlePointerUp once we know whether the button moved.
-  const onPaneContextMenu = useCallback((e: React.MouseEvent | MouseEvent) => {
-    e.preventDefault()
-  }, [])
-
-  const onNodeContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-  }, [])
-
-  // Belt-and-suspenders layer for the empty-canvas case: a genuine native, capture-phase
-  // `contextmenu` listener on window, completely independent of React Flow's own prop wiring.
-  //
-  // Bug that was here before: this used to gate on `if (e.button === 2)` before calling
-  // preventDefault(). That check is wrong for a `contextmenu` event specifically — `.button` on
-  // `contextmenu` is unreliable across browsers (often 0, not 2, even for a genuine right-click),
-  // so the condition silently failed and preventDefault() never actually ran. That's exactly why
-  // it only ever leaked on empty canvas: node right-clicks were still caught by
-  // onNodeContextMenu (unconditional, no button check), but empty-canvas clicks had nothing else
-  // backing them up once this conditional silently no-opped. Fix: never gate a `contextmenu`
-  // handler on `.button` — always prevent it unconditionally, the same way onPaneContextMenu/
-  // onNodeContextMenu above already do.
-  useEffect(() => {
-    const preventBrowserContextMenu = (e: MouseEvent) => {
-      e.preventDefault()
-    }
-
-    window.addEventListener('contextmenu', preventBrowserContextMenu, {
-      capture: true,
-      passive: false,
-    })
-
-    return () => {
-      window.removeEventListener('contextmenu', preventBrowserContextMenu, { capture: true })
-    }
-  }, [])
-
-  // ---------------------------------------------------------------------------------------
-  // Delete key => remove whatever's selected. Escape => cancel connect-mode / dismiss popups.
-  // Guarded against text inputs so renaming a stage or typing in a search box doesn't also
-  // delete a node sitting behind it.
-  // ---------------------------------------------------------------------------------------
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null
-      const tag = target?.tagName
-      const isTextEntry =
-        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable
-      if (isTextEntry) return
-
-      // Ctrl+Z / Cmd+Z => undo. Ctrl+Shift+Z / Cmd+Shift+Z => redo (also accepts the
-      // Ctrl+Y convention some people reach for out of habit).
-      const isUndoRedoModifier = e.ctrlKey || e.metaKey
-      if (isUndoRedoModifier && !e.altKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) redo()
-        else undo()
-        return
-      }
-      if (isUndoRedoModifier && !e.altKey && e.key.toLowerCase() === 'y') {
-        e.preventDefault()
-        redo()
-        return
-      }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedNodeIds.length > 0) {
-          e.preventDefault()
-          removeSelectedNodes()
-        } else if (selectedEdgeId) {
-          e.preventDefault()
-          removeSelectedEdge()
+      const start = rightDownRef.current
+      if (!start) return
+      const { x, y } = toLocal(e.clientX, e.clientY)
+      if (!boxDraggingRef.current) {
+        if (Math.abs(x - start.x) < BOX_SELECT_THRESHOLD_PX && Math.abs(y - start.y) < BOX_SELECT_THRESHOLD_PX) {
+          return
         }
-      } else if (e.key === 'Escape') {
-        if (mode === 'connect') setMode('pan')
-        setBoxSelectVisual(null)
+        boxDraggingRef.current = true
+      }
+      setBoxSelect({ x1: start.x, y1: start.y, x2: x, y2: y })
+    }
+
+    function handleWindowMouseUp(e: MouseEvent) {
+      if (e.button !== 2) return
+      const start = rightDownRef.current
+      rightDownRef.current = null
+      if (!start) return
+
+      if (boxDraggingRef.current) {
+        boxDraggingRef.current = false
+        const { x, y } = toLocal(e.clientX, e.clientY)
+        const selRect = {
+          left: Math.min(start.x, x),
+          right: Math.max(start.x, x),
+          top: Math.min(start.y, y),
+          bottom: Math.max(start.y, y),
+        }
+        const hitIds = nodes
+          .filter((n) => {
+            const nx1 = n.position.x * viewport.zoom + viewport.x
+            const ny1 = n.position.y * viewport.zoom + viewport.y
+            const nx2 = nx1 + NODE_CARD_WIDTH * viewport.zoom
+            const ny2 = ny1 + NODE_CARD_HEIGHT * viewport.zoom
+            return nx1 < selRect.right && nx2 > selRect.left && ny1 < selRect.bottom && ny2 > selRect.top
+          })
+          .map((n) => n.id)
+
+        if (hitIds.length > 0) {
+          if (start.shift) addNodesToSelection(hitIds)
+          else setSelectedNodeIds(hitIds)
+        } else if (!start.shift) {
+          setSelectedNodeIds([])
+        }
+
+        setBoxSelect(null)
+        // The browser's contextmenu event (and, downstream, our own pane/node context menu
+        // handlers) fires right after this mouseup — swallow just that one.
+        suppressContextMenuOpenRef.current = true
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [
-    selectedNodeIds,
-    selectedEdgeId,
-    removeSelectedNodes,
-    removeSelectedEdge,
-    mode,
-    setMode,
-    undo,
-    redo,
-  ])
 
-  
+    window.addEventListener('mousemove', handleWindowMouseMove)
+    window.addEventListener('mouseup', handleWindowMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove)
+      window.removeEventListener('mouseup', handleWindowMouseUp)
+    }
+  }, [nodes, viewport, addNodesToSelection, setSelectedNodeIds])
 
-  // The handle lives inside `.react-flow__viewport`, which React Flow itself scales with a CSS
-  // `transform: scale(zoom)`. To keep the handle's ON-SCREEN size (both the visible dot and its
-  // wider hit/hover area) constant at any zoom level, their flow-space size must scale by the
-  // inverse, `1 / zoom` — the two cancel out exactly. See the `.react-flow__handle` rules in
-  // index.css that consume this as --handle-zoom-scale.
-  const handleZoomScale = 1 / viewport.zoom
+  const onWrapperMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 2) return
+    const rect = wrapperRef.current?.getBoundingClientRect()
+    rightDownRef.current = {
+      x: rect ? e.clientX - rect.left : e.clientX,
+      y: rect ? e.clientY - rect.top : e.clientY,
+      shift: e.shiftKey,
+    }
+    boxDraggingRef.current = false
+  }, [])
 
-  // React Flow's own "how close do I need to be to grab/snap onto a handle" radius
-  // (`connectionRadius`, in flow-space units, default 20) suffers the exact same problem: at a
-  // fixed value it gets easier to hit when zoomed in and much harder when zoomed out. Scaling it
-  // by the same inverse-zoom factor keeps starting/finishing a relationship equally easy no
-  // matter how zoomed out the canvas is.
-  const connectionRadius = 20 * handleZoomScale
+  const onWrapperMouseMoveTracker = useCallback((e: React.MouseEvent) => {
+    lastPointerRef.current = { x: e.clientX, y: e.clientY }
+  }, [])
+
+  // ---- Context menu hardening (2nd and 3rd layer) ----
+  // Layer 1 is onPaneContextMenu / onNodeContextMenu above (React Flow's own hooks). This
+  // window-level capture listener is a backstop for right-clicks React Flow's handlers don't
+  // see (minimap, controls, edges, empty margins, ...). We deliberately don't gate this on
+  // e.button — reading `button` off a `contextmenu` event isn't reliable across browsers, and
+  // `contextmenu` only ever fires for an actual context-menu gesture in the first place, so
+  // there's nothing to check.
+  useEffect(() => {
+    function preventNativeMenu(e: MouseEvent) {
+      e.preventDefault()
+    }
+    window.addEventListener('contextmenu', preventNativeMenu, true)
+    return () => window.removeEventListener('contextmenu', preventNativeMenu, true)
+  }, [])
+
+  const onMove = useCallback((_: unknown, vp: Viewport) => {
+    setViewport(vp)
+  }, [])
 
   return (
     <div className="relative flex-1 overflow-hidden bg-[var(--paper)]">
       <StageHeaderBar translateX={viewport.x} zoom={viewport.zoom} />
 
       <div
-        ref={canvasWrapperRef}
+        ref={wrapperRef}
+        onMouseDown={onWrapperMouseDown}
+        onMouseMove={onWrapperMouseMoveTracker}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ '--handle-zoom-scale': handleZoomScale(viewport.zoom) } as React.CSSProperties}
         className="relative h-[calc(100%-52px)] bg-[var(--paper)]"
-        style={{ '--handle-zoom-scale': handleZoomScale } as React.CSSProperties}
-        onPointerDown={onCanvasPointerDown}
       >
         <StageColumnGuides translateX={viewport.x} zoom={viewport.zoom} />
 
@@ -591,9 +451,9 @@ export function CanvasEditor() {
           onMove={onMove}
           panOnScroll
           zoomOnScroll
+          connectionRadius={connectionRadiusForZoom(viewport.zoom)}
           minZoom={0.3}
           maxZoom={2}
-          connectionRadius={connectionRadius}
           proOptions={{ hideAttribution: true }}
           className="rf-transparent-bg"
           defaultEdgeOptions={{ type: 'default' }}
@@ -610,22 +470,19 @@ export function CanvasEditor() {
           />
         </ReactFlow>
 
-        {boxSelectVisual &&
-          (() => {
-            const rect = canvasWrapperRef.current?.getBoundingClientRect()
-            const offsetX = rect?.left ?? 0
-            const offsetY = rect?.top ?? 0
-            const left = Math.min(boxSelectVisual.startClientX, boxSelectVisual.curClientX) - offsetX
-            const top = Math.min(boxSelectVisual.startClientY, boxSelectVisual.curClientY) - offsetY
-            const width = Math.abs(boxSelectVisual.curClientX - boxSelectVisual.startClientX)
-            const height = Math.abs(boxSelectVisual.curClientY - boxSelectVisual.startClientY)
-            return (
-              <div
-                className="pointer-events-none absolute z-30 border border-dashed border-[var(--selected)] bg-[var(--selected)]/10"
-                style={{ left, top, width, height }}
-              />
-            )
-          })()}
+        {boxSelect && (
+          <div
+            className="pointer-events-none absolute z-30 border border-dashed"
+            style={{
+              left: Math.min(boxSelect.x1, boxSelect.x2),
+              top: Math.min(boxSelect.y1, boxSelect.y2),
+              width: Math.abs(boxSelect.x2 - boxSelect.x1),
+              height: Math.abs(boxSelect.y2 - boxSelect.y1),
+              borderColor: 'var(--selected)',
+              backgroundColor: 'rgba(91, 157, 245, 0.08)',
+            }}
+          />
+        )}
 
         <div className="pointer-events-none absolute bottom-[122px] left-2 font-technical text-[9px] uppercase tracking-wider text-[var(--ink-400)]">
           Minimap

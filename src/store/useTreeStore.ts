@@ -31,17 +31,23 @@ interface PersistedShape {
   stages: Stage[]
   treeNodes: TreeNode[]
   edges: IndustrialEdge[]
-  collapsedNodeIds?: string[]
   savedAt: string
+  // View preference, not domain data — persisted alongside the draft but never pushed onto the
+  // undo/redo history (see pushHistory / snapshotOf below, which only track stages/treeNodes/edges).
+  collapsedNodeIds?: string[]
 }
 
 interface PendingConnection {
   sourceId: string
   targetId: string
-  // Where (in screen/viewport px) the connection was made, so the Create Relationship popover
-  // can open right there instead of always snapping to the center of the screen.
-  screenX?: number
-  screenY?: number
+  /** Screen coordinates (viewport px) the Create Relationship popover should float around. */
+  screenX: number
+  screenY: number
+}
+
+export interface NodeMove {
+  treeNodeId: string
+  position: { x: number; y: number }
 }
 
 interface TreeStoreState {
@@ -60,16 +66,13 @@ interface TreeStoreState {
   // ----- selection / UI mode -----
   mode: EditorMode
   selectedNodeId: string | null
-  /** All canvas-highlighted nodes — a plain click sets this to a single id, box-select or
-   *  shift-click can grow it. Dragging any node in here drags the whole group (see
-   *  CanvasEditor's onNodeDragStop). */
+  /** All currently-selected nodes; selectedNodeId mirrors its last entry for single-node UI. */
   selectedNodeIds: string[]
   selectedEdgeId: string | null
   activeStageId: string | null
 
-  // ----- view state -----
-  /** Node ids whose downstream subtree is collapsed/hidden from the canvas. Purely a view
-   *  preference — not part of undo history, but still saved with the draft. */
+  // ----- view preferences -----
+  /** Node ids whose subtree is collapsed. Persisted, but intentionally excluded from undo/redo. */
   collapsedNodeIds: string[]
 
   // ----- panels -----
@@ -92,12 +95,16 @@ interface TreeStoreState {
 
   setMode: (mode: EditorMode) => void
   selectNode: (id: string | null) => void
-  /** Replace the whole multi-selection (box-select drop, or a plain click passing a single id). */
-  selectNodes: (ids: string[]) => void
-  /** Shift-click convenience: add/remove one node from the current multi-selection. */
+  /** Shift+click: toggles a single node's membership in the current multi-selection. */
   toggleNodeInSelection: (id: string) => void
+  /** Replaces the whole selection wholesale (used by rubber-band box select). */
+  setSelectedNodeIds: (ids: string[]) => void
+  /** Adds ids to the current selection without clearing it (Shift + box select). */
+  addNodesToSelection: (ids: string[]) => void
   selectEdge: (id: string | null) => void
   setActiveStage: (id: string | null) => void
+
+  toggleNodeCollapsed: (nodeId: string) => void
 
   openDetail: (nodeId: string) => void
   closeDetail: () => void
@@ -111,25 +118,20 @@ interface TreeStoreState {
     position?: { x: number; y: number },
   ) => string | null
   removeTreeNode: (treeNodeId: string) => void
+  /** Deletes every node currently in selectedNodeIds (falling back to selectedNodeId) as one step. */
   removeSelectedNodes: () => void
   duplicateTreeNode: (treeNodeId: string) => void
   moveTreeNode: (treeNodeId: string, position: { x: number; y: number }) => void
   dropTreeNode: (treeNodeId: string, position: { x: number; y: number }) => void
-  /** Bulk version of dropTreeNode — used when a multi-node selection is dragged together, so
-   *  the whole move lands as a single undo step instead of one per node. */
-  dropTreeNodes: (updates: Array<{ id: string; position: { x: number; y: number } }>) => void
+  /** Drops several nodes (a multi-selection drag) in a single undo step; each snaps to its own nearest stage column. */
+  dropTreeNodes: (moves: NodeMove[]) => void
   changeNodeStage: (treeNodeId: string, stageId: string) => void
   changeNodeStatus: (treeNodeId: string, status: NodeStatus) => void
   changeNodePriority: (treeNodeId: string, priority: Priority) => void
-  toggleNodeCollapse: (treeNodeId: string) => void
 
   beginConnectFrom: (treeNodeId: string) => void
   cancelConnect: () => void
-  requestConnection: (
-    sourceId: string,
-    targetId: string,
-    screenPos?: { x: number; y: number },
-  ) => void
+  requestConnection: (sourceId: string, targetId: string, screenPos?: { x: number; y: number }) => void
   confirmConnection: (relationType: RelationType) => void
   cancelConnection: () => void
   removeEdge: (edgeId: string) => void
@@ -201,7 +203,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   treeNodes: [],
   edges: [],
 
-  mode: 'pan',
+  mode: 'select',
   selectedNodeId: null,
   selectedNodeIds: [],
   selectedEdgeId: null,
@@ -230,9 +232,9 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         stages: persisted.stages,
         treeNodes: persisted.treeNodes,
         edges: persisted.edges,
-        collapsedNodeIds: persisted.collapsedNodeIds ?? [],
         lastSavedAt: persisted.savedAt,
         activeStageId: persisted.stages[0]?.id ?? null,
+        collapsedNodeIds: persisted.collapsedNodeIds ?? [],
       })
       return
     }
@@ -258,8 +260,8 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       selectedNodeId: null,
       selectedNodeIds: [],
       selectedEdgeId: null,
-      collapsedNodeIds: [],
       activeStageId: built.stages[0]?.id ?? null,
+      collapsedNodeIds: [],
       past: [],
       future: [],
       isNewTreeOpen: false,
@@ -270,36 +272,55 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
 
   setMode: (mode) => set({ mode, connectSourceId: null }),
   selectNode: (id) =>
-    set({
+    set((s) => ({
       selectedNodeId: id,
       selectedNodeIds: id ? [id] : [],
-      selectedEdgeId: id ? null : get().selectedEdgeId,
+      selectedEdgeId: id ? null : s.selectedEdgeId,
+    })),
+  toggleNodeInSelection: (id) =>
+    set((s) => {
+      const exists = s.selectedNodeIds.includes(id)
+      const nextIds = exists ? s.selectedNodeIds.filter((n) => n !== id) : [...s.selectedNodeIds, id]
+      return {
+        selectedNodeIds: nextIds,
+        selectedNodeId: nextIds.length > 0 ? nextIds[nextIds.length - 1] : null,
+        selectedEdgeId: nextIds.length > 0 ? null : s.selectedEdgeId,
+      }
     }),
-  selectNodes: (ids) =>
-    set({
+  setSelectedNodeIds: (ids) =>
+    set((s) => ({
       selectedNodeIds: ids,
-      selectedNodeId: ids.length === 1 ? ids[0] : null,
-      selectedEdgeId: ids.length > 0 ? null : get().selectedEdgeId,
+      selectedNodeId: ids.length > 0 ? ids[ids.length - 1] : null,
+      selectedEdgeId: ids.length > 0 ? null : s.selectedEdgeId,
+    })),
+  addNodesToSelection: (ids) =>
+    set((s) => {
+      const merged = Array.from(new Set([...s.selectedNodeIds, ...ids]))
+      return {
+        selectedNodeIds: merged,
+        selectedNodeId: merged.length > 0 ? merged[merged.length - 1] : null,
+        selectedEdgeId: merged.length > 0 ? null : s.selectedEdgeId,
+      }
     }),
-  toggleNodeInSelection: (id) => {
-    const state = get()
-    const exists = state.selectedNodeIds.includes(id)
-    const nextIds = exists ? state.selectedNodeIds.filter((x) => x !== id) : [...state.selectedNodeIds, id]
-    set({
-      selectedNodeIds: nextIds,
-      selectedNodeId: nextIds.length === 1 ? nextIds[0] : null,
-      selectedEdgeId: nextIds.length > 0 ? null : state.selectedEdgeId,
-    })
-  },
   selectEdge: (id) =>
-    set({
+    set((s) => ({
       selectedEdgeId: id,
-      selectedNodeId: id ? null : get().selectedNodeId,
-      selectedNodeIds: id ? [] : get().selectedNodeIds,
-    }),
+      selectedNodeId: id ? null : s.selectedNodeId,
+      selectedNodeIds: id ? [] : s.selectedNodeIds,
+    })),
   setActiveStage: (id) => set({ activeStageId: id }),
 
-  openDetail: (nodeId) => set({ isDetailOpen: true, selectedNodeId: nodeId }),
+  // Collapse/expand is a view preference: it must survive save/reload (see PersistedShape /
+  // saveDraft / init above), but deliberately does NOT call pushHistory, so it never shows up
+  // in undo/redo — toggling it is not a "change" to the tree's data.
+  toggleNodeCollapsed: (nodeId) =>
+    set((s) => ({
+      collapsedNodeIds: s.collapsedNodeIds.includes(nodeId)
+        ? s.collapsedNodeIds.filter((id) => id !== nodeId)
+        : [...s.collapsedNodeIds, nodeId],
+    })),
+
+  openDetail: (nodeId) => set({ isDetailOpen: true, selectedNodeId: nodeId, selectedNodeIds: [nodeId] }),
   closeDetail: () => set({ isDetailOpen: false }),
   openNewTreeDialog: () => set({ isNewTreeOpen: true }),
   closeNewTreeDialog: () => set({ isNewTreeOpen: false }),
@@ -349,7 +370,6 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       edges: state.edges.filter((e) => e.source !== treeNodeId && e.target !== treeNodeId),
       selectedNodeId: state.selectedNodeId === treeNodeId ? null : state.selectedNodeId,
       selectedNodeIds: state.selectedNodeIds.filter((id) => id !== treeNodeId),
-      collapsedNodeIds: state.collapsedNodeIds.filter((id) => id !== treeNodeId),
       isDetailOpen: state.selectedNodeId === treeNodeId ? false : state.isDetailOpen,
       hasUnsavedChanges: true,
     })
@@ -357,24 +377,22 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
 
   removeSelectedNodes: () => {
     const state = get()
-    const idList = state.selectedNodeIds.length > 0
-      ? state.selectedNodeIds
-      : state.selectedNodeId
-        ? [state.selectedNodeId]
-        : []
-    if (idList.length === 0) return
-    const ids = new Set(idList)
+    const ids = state.selectedNodeIds.length > 0 ? state.selectedNodeIds : state.selectedNodeId ? [state.selectedNodeId] : []
+    if (ids.length === 0) {
+      get().showToast('Pilih node terlebih dahulu')
+      return
+    }
     pushHistory(get, set)
+    const idSet = new Set(ids)
     set({
-      treeNodes: state.treeNodes.filter((n) => !ids.has(n.id)),
-      edges: state.edges.filter((e) => !ids.has(e.source) && !ids.has(e.target)),
-      collapsedNodeIds: state.collapsedNodeIds.filter((id) => !ids.has(id)),
-      selectedNodeIds: [],
+      treeNodes: state.treeNodes.filter((n) => !idSet.has(n.id)),
+      edges: state.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)),
       selectedNodeId: null,
-      isDetailOpen: state.selectedNodeId && ids.has(state.selectedNodeId) ? false : state.isDetailOpen,
+      selectedNodeIds: [],
+      isDetailOpen: state.selectedNodeId && idSet.has(state.selectedNodeId) ? false : state.isDetailOpen,
       hasUnsavedChanges: true,
     })
-    get().showToast(ids.size > 1 ? `${ids.size} node dihapus` : 'Node dihapus')
+    get().showToast(ids.length > 1 ? `${ids.length} node dihapus` : 'Node dihapus')
   },
 
   duplicateTreeNode: (treeNodeId) => {
@@ -427,39 +445,28 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     }
   },
 
-  /** Bulk drop for a multi-node group drag: every node snaps to its own nearest stage column,
-   *  but the whole move is a single history entry instead of one push per node. */
-  dropTreeNodes: (updates) => {
-    if (updates.length === 0) return
+  /** Called when a multi-node drag ends: every node snaps to its own nearest stage column, but
+   *  the whole move counts as a single undo step (one pushHistory call), not one per node. */
+  dropTreeNodes: (moves) => {
     const state = get()
     const sortedStages = [...state.stages].sort((a, b) => a.order - b.order)
-    if (sortedStages.length === 0) return
+    if (sortedStages.length === 0 || moves.length === 0) return
 
-    const updateById = new Map(updates.map((u) => [u.id, u.position]))
-    let movedStageCount = 0
-    let lastStageLabel = ''
-
-    const nextTreeNodes = state.treeNodes.map((n) => {
-      const pos = updateById.get(n.id)
-      if (!pos) return n
-      const nodeCenterX = pos.x + NODE_CARD_WIDTH / 2
-      const order = nearestStageOrder(nodeCenterX, sortedStages.length)
-      const stage = sortedStages[order]
-      if (stage.id !== n.stageId) {
-        movedStageCount += 1
-        lastStageLabel = `${stage.code} — ${stage.name}`
-      }
-      return { ...n, stageId: stage.id, position: { x: nodeXForStage(stage.order), y: pos.y } }
-    })
+    const moveMap = new Map(moves.map((m) => [m.treeNodeId, m.position]))
 
     pushHistory(get, set)
-    set({ treeNodes: nextTreeNodes, hasUnsavedChanges: true })
-
-    if (movedStageCount === 1) {
-      get().showToast(`Dipindahkan ke ${lastStageLabel}`)
-    } else if (movedStageCount > 1) {
-      get().showToast(`${movedStageCount} node dipindahkan ke stage baru`)
-    }
+    set({
+      treeNodes: state.treeNodes.map((n) => {
+        const pos = moveMap.get(n.id)
+        if (!pos) return n
+        const nodeCenterX = pos.x + NODE_CARD_WIDTH / 2
+        const order = nearestStageOrder(nodeCenterX, sortedStages.length)
+        const stage = sortedStages[order]
+        return { ...n, stageId: stage.id, position: { x: nodeXForStage(stage.order), y: pos.y } }
+      }),
+      hasUnsavedChanges: true,
+    })
+    get().showToast(`${moves.length} node dipindahkan`)
   },
 
   changeNodeStage: (treeNodeId, stageId) => {
@@ -497,27 +504,20 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     }))
   },
 
-  toggleNodeCollapse: (treeNodeId) => {
-    const state = get()
-    const isCollapsed = state.collapsedNodeIds.includes(treeNodeId)
-    // A view-only toggle (what's hidden vs shown) — deliberately NOT pushed onto the undo
-    // history, same as selection changes, so collapsing a branch doesn't clutter Undo.
-    set({
-      collapsedNodeIds: isCollapsed
-        ? state.collapsedNodeIds.filter((id) => id !== treeNodeId)
-        : [...state.collapsedNodeIds, treeNodeId],
-    })
-  },
-
   beginConnectFrom: (treeNodeId) => set({ mode: 'connect', connectSourceId: treeNodeId }),
-  cancelConnect: () => set({ connectSourceId: null }),
+  cancelConnect: () => set({ connectSourceId: null, mode: 'select' }),
 
   requestConnection: (sourceId, targetId, screenPos) => {
     if (sourceId === targetId) {
       get().showToast('Tidak bisa menghubungkan node ke dirinya sendiri')
       return
     }
-    set({ pendingConnection: { sourceId, targetId, screenX: screenPos?.x, screenY: screenPos?.y } })
+    const pos =
+      screenPos ??
+      (typeof window !== 'undefined'
+        ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+        : { x: 0, y: 0 })
+    set({ pendingConnection: { sourceId, targetId, screenX: pos.x, screenY: pos.y } })
   },
 
   confirmConnection: (relationType) => {
@@ -535,12 +535,13 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       edges: [...state.edges, newEdge],
       pendingConnection: null,
       connectSourceId: null,
+      mode: 'select',
       hasUnsavedChanges: true,
     })
     get().showToast('Relasi dibuat')
   },
 
-  cancelConnection: () => set({ pendingConnection: null }),
+  cancelConnection: () => set({ pendingConnection: null, connectSourceId: null, mode: 'select' }),
 
   removeEdge: (edgeId) => {
     pushHistory(get, set)
@@ -662,8 +663,8 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       stages: state.stages,
       treeNodes: state.treeNodes,
       edges: state.edges,
-      collapsedNodeIds: state.collapsedNodeIds,
       savedAt,
+      collapsedNodeIds: state.collapsedNodeIds,
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -688,13 +689,13 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       stages: persisted.stages,
       treeNodes: persisted.treeNodes,
       edges: persisted.edges,
-      collapsedNodeIds: persisted.collapsedNodeIds ?? [],
       selectedNodeId: null,
       selectedNodeIds: [],
       selectedEdgeId: null,
       past: [],
       future: [],
       hasUnsavedChanges: false,
+      collapsedNodeIds: persisted.collapsedNodeIds ?? [],
     })
     get().showToast('Perubahan dibatalkan')
   },

@@ -27,10 +27,9 @@ npm run preview
 ## Yang sengaja tidak dibuat
 
 Backend, API, autentikasi, database, form edit master data (nama, HS code,
-export/import value, patent, dsb.) — sesuai brief, semuanya mock/local state.
+export/import value, patent, dsb.) — semuanya mock/local state.
 
 ## Stack
 
-React 19 + TypeScript + Vite + Tailwind CSS v4 + `@xyflow/react` (React Flow)
-+ Zustand. Tidak memakai ECharts — belum diperlukan untuk mini-visualization
+React 19 + TypeScript + Vite + Tailwind CSS v4 + `@xyflow/react` (React Flow) + Zustand. Tidak memakai ECharts — belum diperlukan untuk mini-visualization
 di detail panel versi ini.

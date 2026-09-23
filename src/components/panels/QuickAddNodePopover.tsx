@@ -52,16 +52,23 @@ export function QuickAddNodePopover({
   const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null)
 
   useEffect(() => {
+    // Left click only — a right-click elsewhere (e.g. opening a context menu) shouldn't also
+    // dismiss this popover.
     function handleClick(e: MouseEvent) {
+      if (e.button !== 0) return
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     function handleEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
     }
-    document.addEventListener('mousedown', handleClick)
+    // Capture phase: React Flow's own pane pan/zoom handling stops mousedown from bubbling up
+    // to the document, so a bubble-phase listener here would never see clicks on the canvas.
+    // Listening during capture (before React Flow's handlers run) makes outside-click closing
+    // work no matter where on the canvas the click lands.
+    document.addEventListener('mousedown', handleClick, true)
     document.addEventListener('keydown', handleEsc)
     return () => {
-      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('mousedown', handleClick, true)
       document.removeEventListener('keydown', handleEsc)
     }
   }, [onClose])
@@ -141,7 +148,10 @@ export function QuickAddNodePopover({
         <h2 className="font-technical text-[11.5px] font-semibold uppercase tracking-wide text-[var(--ink-900)]">
           {connectFromId ? 'Hubungkan ke Simpul Baru' : 'Tambah Simpul'}
         </h2>
-        <button onClick={onClose} className="text-[15px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]">
+        <button
+          onClick={onClose}
+          className="flex h-7 w-7 items-center justify-center text-[22px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]"
+        >
           ×
         </button>
       </div>

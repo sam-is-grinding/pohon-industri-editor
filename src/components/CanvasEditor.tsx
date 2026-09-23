@@ -25,7 +25,7 @@ import { IndustrialNodeCard, type IndustrialNodeData } from './nodes/IndustrialN
 import { StageHeaderBar } from './StageHeaderBar'
 import { StageColumnGuides } from './StageColumnGuides'
 import { NodeContextMenu } from './panels/NodeContextMenu'
-import { ChangeStagePopover } from './panels/ChangeStagePopover'
+import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { EdgeDetailDialog } from './panels/EdgeDetailDialog'
 import { QuickAddNodePopover } from './panels/QuickAddNodePopover'
 import {
@@ -42,6 +42,12 @@ const nodeTypes = { industrial: IndustrialNodeCard }
 
 interface ContextMenuState {
   treeNodeId: string
+  x: number
+  y: number
+}
+
+interface EdgeContextMenuState {
+  edgeId: string
   x: number
   y: number
 }
@@ -85,7 +91,7 @@ export function CanvasEditor() {
 
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
-  const [stagePopover, setStagePopover] = useState<ContextMenuState | null>(null)
+  const [edgeContextMenu, setEdgeContextMenu] = useState<EdgeContextMenuState | null>(null)
   const [openEdgeId, setOpenEdgeId] = useState<string | null>(null)
   const [quickAdd, setQuickAdd] = useState<QuickAddState | null>(null)
   const [boxSelect, setBoxSelect] = useState<BoxSelectRect | null>(null)
@@ -270,7 +276,7 @@ export function CanvasEditor() {
     selectNode(null)
     selectEdge(null)
     setContextMenu(null)
-    setStagePopover(null)
+    setEdgeContextMenu(null)
   }, [selectNode, selectEdge])
 
   const onPaneContextMenu = useCallback(
@@ -282,7 +288,7 @@ export function CanvasEditor() {
         return
       }
       setContextMenu(null)
-      setStagePopover(null)
+      setEdgeContextMenu(null)
 
       if (sortedStages.length === 0) return
       const flowPosition = screenToFlowPosition({ x: e.clientX, y: e.clientY })
@@ -309,7 +315,20 @@ export function CanvasEditor() {
       return
     }
     setQuickAdd(null)
+    setEdgeContextMenu(null)
     setContextMenu({ treeNodeId: node.id, x: e.clientX, y: e.clientY })
+  }, [])
+
+  const onEdgeContextMenu: EdgeMouseHandler = useCallback((e, edge) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (suppressContextMenuOpenRef.current) {
+      suppressContextMenuOpenRef.current = false
+      return
+    }
+    setQuickAdd(null)
+    setContextMenu(null)
+    setEdgeContextMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY })
   }, [])
 
   // ---- Rubber-band box select: right-click + hold + drag on the canvas ----
@@ -446,6 +465,7 @@ export function CanvasEditor() {
           onNodeContextMenu={onNodeContextMenu}
           onEdgeClick={onEdgeClick}
           onEdgeDoubleClick={onEdgeDoubleClick}
+          onEdgeContextMenu={onEdgeContextMenu}
           onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
           onMove={onMove}
@@ -495,16 +515,15 @@ export function CanvasEditor() {
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
-          onChangeStage={() => setStagePopover(contextMenu)}
         />
       )}
 
-      {stagePopover && (
-        <ChangeStagePopover
-          treeNodeId={stagePopover.treeNodeId}
-          x={stagePopover.x}
-          y={stagePopover.y}
-          onClose={() => setStagePopover(null)}
+      {edgeContextMenu && (
+        <EdgeContextMenu
+          edgeId={edgeContextMenu.edgeId}
+          x={edgeContextMenu.x}
+          y={edgeContextMenu.y}
+          onClose={() => setEdgeContextMenu(null)}
         />
       )}
 

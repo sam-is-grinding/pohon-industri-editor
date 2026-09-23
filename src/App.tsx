@@ -7,7 +7,6 @@ import { CanvasEditor } from './components/CanvasEditor'
 import { ValidationBar } from './components/ValidationBar'
 import { NodeDetailDrawer } from './components/panels/NodeDetailDrawer'
 import { NewTreeDialog } from './components/panels/NewTreeDialog'
-import { CreateRelationshipDialog } from './components/panels/CreateRelationshipDialog'
 import { Toast } from './components/Toast'
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -26,7 +25,6 @@ function useGlobalShortcuts() {
   const removeSelectedNodes = useTreeStore((s) => s.removeSelectedNodes)
   const removeSelectedEdge = useTreeStore((s) => s.removeSelectedEdge)
   const cancelConnect = useTreeStore((s) => s.cancelConnect)
-  const cancelConnection = useTreeStore((s) => s.cancelConnection)
   const closeDetail = useTreeStore((s) => s.closeDetail)
 
   useEffect(() => {
@@ -58,9 +56,7 @@ function useGlobalShortcuts() {
       }
       if (e.key === 'Escape') {
         const state = useTreeStore.getState()
-        if (state.pendingConnection) {
-          cancelConnection()
-        } else if (state.connectSourceId) {
+        if (state.connectSourceId) {
           cancelConnect()
         } else if (state.isDetailOpen) {
           closeDetail()
@@ -69,7 +65,7 @@ function useGlobalShortcuts() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [undo, redo, removeSelectedNodes, removeSelectedEdge, cancelConnect, cancelConnection, closeDetail])
+  }, [undo, redo, removeSelectedNodes, removeSelectedEdge, cancelConnect, closeDetail])
 }
 
 export default function App() {
@@ -92,7 +88,6 @@ export default function App() {
 
         <NodeDetailDrawer />
         <NewTreeDialog />
-        <CreateRelationshipDialog />
         <Toast />
       </div>
     </ReactFlowProvider>

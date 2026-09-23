@@ -73,7 +73,7 @@ function IndustrialNodeCardImpl({ data, selected }: NodeProps) {
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      openDetail(treeNodeId)
+      openDetail(treeNodeId, { x: e.clientX, y: e.clientY })
     },
     [openDetail, treeNodeId],
   )

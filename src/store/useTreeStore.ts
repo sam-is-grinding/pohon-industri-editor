@@ -5,12 +5,12 @@ import type {
   NodeStatus,
   Priority,
   PublishStatus,
-  RelationType,
   Stage,
   TreeNode,
   TreeSnapshot,
 } from '../types'
 import { getMasterNode } from '../data/masterCatalog'
+import { DEFAULT_RELATION_TYPE } from '../types'
 import { buildTemplate, type TemplateId } from '../data/templates'
 import { makeId } from '../utils/id'
 import {
@@ -37,10 +37,7 @@ interface PersistedShape {
   collapsedNodeIds?: string[]
 }
 
-interface PendingConnection {
-  sourceId: string
-  targetId: string
-  /** Screen coordinates (viewport px) the Create Relationship popover should float around. */
+interface DetailPosition {
   screenX: number
   screenY: number
 }
@@ -79,8 +76,10 @@ interface TreeStoreState {
   isDetailOpen: boolean
   isNewTreeOpen: boolean
   isValidationPanelOpen: boolean
-  pendingConnection: PendingConnection | null
   connectSourceId: string | null
+  /** Screen position (viewport px) the Node Detail panel should open centered on — mirrors how
+   *  the Quick Add popover floats around the mouse. Null falls back to a sensible default. */
+  detailPosition: DetailPosition | null
 
   // ----- history -----
   past: TreeSnapshot[]
@@ -106,7 +105,9 @@ interface TreeStoreState {
 
   toggleNodeCollapsed: (nodeId: string) => void
 
-  openDetail: (nodeId: string) => void
+  /** screenPos, when given, is where the panel should open centered (e.g. the click/double-click
+   *  that triggered it) — mirrors the Quick Add popover's behavior instead of always docking. */
+  openDetail: (nodeId: string, screenPos?: { x: number; y: number }) => void
   closeDetail: () => void
   openNewTreeDialog: () => void
   closeNewTreeDialog: () => void
@@ -120,7 +121,6 @@ interface TreeStoreState {
   removeTreeNode: (treeNodeId: string) => void
   /** Deletes every node currently in selectedNodeIds (falling back to selectedNodeId) as one step. */
   removeSelectedNodes: () => void
-  duplicateTreeNode: (treeNodeId: string) => void
   moveTreeNode: (treeNodeId: string, position: { x: number; y: number }) => void
   dropTreeNode: (treeNodeId: string, position: { x: number; y: number }) => void
   /** Drops several nodes (a multi-selection drag) in a single undo step; each snaps to its own nearest stage column. */
@@ -132,8 +132,6 @@ interface TreeStoreState {
   beginConnectFrom: (treeNodeId: string) => void
   cancelConnect: () => void
   requestConnection: (sourceId: string, targetId: string, screenPos?: { x: number; y: number }) => void
-  confirmConnection: (relationType: RelationType) => void
-  cancelConnection: () => void
   removeEdge: (edgeId: string) => void
   removeSelectedEdge: () => void
 
@@ -214,8 +212,8 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   isDetailOpen: false,
   isNewTreeOpen: false,
   isValidationPanelOpen: false,
-  pendingConnection: null,
   connectSourceId: null,
+  detailPosition: null,
 
   past: [],
   future: [],
@@ -320,7 +318,13 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
         : [...s.collapsedNodeIds, nodeId],
     })),
 
-  openDetail: (nodeId) => set({ isDetailOpen: true, selectedNodeId: nodeId, selectedNodeIds: [nodeId] }),
+  openDetail: (nodeId, screenPos) =>
+    set({
+      isDetailOpen: true,
+      selectedNodeId: nodeId,
+      selectedNodeIds: [nodeId],
+      detailPosition: screenPos ? { screenX: screenPos.x, screenY: screenPos.y } : null,
+    }),
   closeDetail: () => set({ isDetailOpen: false }),
   openNewTreeDialog: () => set({ isNewTreeOpen: true }),
   closeNewTreeDialog: () => set({ isNewTreeOpen: false }),
@@ -393,20 +397,6 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       hasUnsavedChanges: true,
     })
     get().showToast(ids.length > 1 ? `${ids.length} node dihapus` : 'Node dihapus')
-  },
-
-  duplicateTreeNode: (treeNodeId) => {
-    const state = get()
-    const original = state.treeNodes.find((n) => n.id === treeNodeId)
-    if (!original) return
-    pushHistory(get, set)
-    const clone: TreeNode = {
-      ...original,
-      id: makeId('tn'),
-      position: { x: original.position.x + 24, y: original.position.y + 24 },
-    }
-    set({ treeNodes: [...state.treeNodes, clone], hasUnsavedChanges: true, selectedNodeId: clone.id })
-    get().showToast('Node diduplikasi')
   },
 
   moveTreeNode: (treeNodeId, position) => {
@@ -507,41 +497,36 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   beginConnectFrom: (treeNodeId) => set({ mode: 'connect', connectSourceId: treeNodeId }),
   cancelConnect: () => set({ connectSourceId: null, mode: 'select' }),
 
-  requestConnection: (sourceId, targetId, screenPos) => {
+  // Connections are made immediately, with no confirmation step — see requestConnection below.
+  requestConnection: (sourceId, targetId) => {
     if (sourceId === targetId) {
       get().showToast('Tidak bisa menghubungkan node ke dirinya sendiri')
+      set({ connectSourceId: null, mode: 'select' })
       return
     }
-    const pos =
-      screenPos ??
-      (typeof window !== 'undefined'
-        ? { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-        : { x: 0, y: 0 })
-    set({ pendingConnection: { sourceId, targetId, screenX: pos.x, screenY: pos.y } })
-  },
-
-  confirmConnection: (relationType) => {
-    const state = get()
-    const pending = state.pendingConnection
-    if (!pending) return
+    const alreadyConnected = get().edges.some(
+      (e) => e.source === sourceId && e.target === targetId,
+    )
+    if (alreadyConnected) {
+      get().showToast('Relasi antara kedua node ini sudah ada')
+      set({ connectSourceId: null, mode: 'select' })
+      return
+    }
     pushHistory(get, set)
     const newEdge: IndustrialEdge = {
       id: makeId('edge'),
-      source: pending.sourceId,
-      target: pending.targetId,
-      relationType,
+      source: sourceId,
+      target: targetId,
+      relationType: DEFAULT_RELATION_TYPE,
     }
-    set({
-      edges: [...state.edges, newEdge],
-      pendingConnection: null,
+    set((s) => ({
+      edges: [...s.edges, newEdge],
       connectSourceId: null,
       mode: 'select',
       hasUnsavedChanges: true,
-    })
+    }))
     get().showToast('Relasi dibuat')
   },
-
-  cancelConnection: () => set({ pendingConnection: null, connectSourceId: null, mode: 'select' }),
 
   removeEdge: (edgeId) => {
     pushHistory(get, set)

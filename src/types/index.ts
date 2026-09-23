@@ -109,8 +109,13 @@ export const STATUS_LABEL: Record<NodeStatus, string> = {
 }
 
 export const RELATION_LABEL: Record<RelationType, string> = {
-  transformation: 'Transformation',
+  transformation: 'Turunan',
   input: 'Input',
   output: 'Output',
   application: 'Application',
 }
+
+/** The editor only ever lets the user create this single relation type — new relationships are
+ * connected immediately (see requestConnection in the store) with no relation-type picker. The
+ * other RelationType values still exist purely to display legacy/template edge data. */
+export const DEFAULT_RELATION_TYPE: RelationType = 'transformation'

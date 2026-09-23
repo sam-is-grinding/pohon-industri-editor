@@ -6,14 +6,11 @@ interface Props {
   x: number
   y: number
   onClose: () => void
-  onChangeStage: () => void
 }
 
-export function NodeContextMenu({ treeNodeId, x, y, onClose, onChangeStage }: Props) {
+export function NodeContextMenu({ treeNodeId, x, y, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const openDetail = useTreeStore((s) => s.openDetail)
-  const beginConnectFrom = useTreeStore((s) => s.beginConnectFrom)
-  const duplicateTreeNode = useTreeStore((s) => s.duplicateTreeNode)
   const removeTreeNode = useTreeStore((s) => s.removeTreeNode)
 
   useEffect(() => {
@@ -35,28 +32,7 @@ export function NodeContextMenu({ treeNodeId, x, y, onClose, onChangeStage }: Pr
     {
       label: 'Lihat Detail',
       action: () => {
-        openDetail(treeNodeId)
-        onClose()
-      },
-    },
-    {
-      label: 'Connect From',
-      action: () => {
-        beginConnectFrom(treeNodeId)
-        onClose()
-      },
-    },
-    {
-      label: 'Duplicate',
-      action: () => {
-        duplicateTreeNode(treeNodeId)
-        onClose()
-      },
-    },
-    {
-      label: 'Change Stage',
-      action: () => {
-        onChangeStage()
+        openDetail(treeNodeId, { x, y })
         onClose()
       },
     },

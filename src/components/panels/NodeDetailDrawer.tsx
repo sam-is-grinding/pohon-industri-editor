@@ -32,6 +32,7 @@ export function NodeDetailDrawer() {
   const isOpen = useTreeStore((s) => s.isDetailOpen)
   const close = useTreeStore((s) => s.closeDetail)
   const selectedNodeId = useTreeStore((s) => s.selectedNodeId)
+  const detailPosition = useTreeStore((s) => s.detailPosition)
   const treeNode = useTreeStore((s) => s.treeNodes.find((n) => n.id === s.selectedNodeId))
   // const stages = useTreeStore((s) => [...s.stages].sort((a, b) => a.order - b.order))
   const stages = useTreeStore((s) => s.stages)
@@ -46,10 +47,15 @@ export function NodeDetailDrawer() {
 
   const ref = useRef<HTMLDivElement>(null)
 
-  // Floats near the top-right by default (roughly where the fixed drawer used to live), but can
-  // be dragged anywhere; resets there whenever a different node's detail is opened.
-  const defaultLeft = Math.max(window.innerWidth - PANEL_WIDTH - 24, 12)
-  const defaultTop = 84
+  // Centers on wherever the node was opened from (double-click, context menu, validation list —
+  // see openDetail callers), clamped to stay fully on-screen, mirroring the Quick Add popover.
+  // Falls back to a near-top-right default when no position was given.
+  const defaultLeft = detailPosition
+    ? Math.min(Math.max(detailPosition.screenX - PANEL_WIDTH / 2, 12), window.innerWidth - PANEL_WIDTH - 12)
+    : Math.max(window.innerWidth - PANEL_WIDTH - 24, 12)
+  const defaultTop = detailPosition
+    ? Math.min(Math.max(detailPosition.screenY - PANEL_HEIGHT / 2, 12), window.innerHeight - PANEL_HEIGHT - 12)
+    : 84
   const { left, top, onHeaderPointerDown, onHeaderPointerMove, onHeaderPointerUp } = useDraggablePosition(
     defaultLeft,
     defaultTop,
@@ -59,7 +65,10 @@ export function NodeDetailDrawer() {
 
   useEffect(() => {
     if (!isOpen) return
+    // Left click only — a right-click elsewhere (e.g. opening a context menu) shouldn't also
+    // dismiss this panel.
     function handleClick(e: MouseEvent) {
+      if (e.button !== 0) return
       if (ref.current && !ref.current.contains(e.target as Node)) close()
     }
     document.addEventListener('mousedown', handleClick)
@@ -98,7 +107,10 @@ export function NodeDetailDrawer() {
         <h2 className="font-technical text-[12px] font-semibold uppercase tracking-wide text-[var(--ink-900)]">
           Node Detail
         </h2>
-        <button onClick={close} className="text-[16px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]">
+        <button
+          onClick={close}
+          className="flex h-7 w-7 items-center justify-center text-[22px] leading-none text-[var(--ink-500)] hover:text-[var(--ink-900)]"
+        >
           ×
         </button>
       </div>

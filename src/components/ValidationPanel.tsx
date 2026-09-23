@@ -38,11 +38,11 @@ export function ValidationPanel({ issues, onClose }: Props) {
           {errors.map((e) => (
             <button
               key={e.id}
-              onClick={() => {
+              onClick={(ev) => {
                 const nodeId = e.relatedNodeIds?.[0]
                 if (nodeId) {
                   selectNode(nodeId)
-                  openDetail(nodeId)
+                  openDetail(nodeId, { x: ev.clientX, y: ev.clientY })
                 }
               }}
               className="mb-1.5 block w-full border-l-2 border-[var(--signal-critical)] bg-[var(--ink-50)] px-2.5 py-1.5 text-left"
@@ -62,11 +62,11 @@ export function ValidationPanel({ issues, onClose }: Props) {
           {warnings.map((w) => (
             <button
               key={w.id}
-              onClick={() => {
+              onClick={(ev) => {
                 const nodeId = w.relatedNodeIds?.[0]
                 if (nodeId) {
                   selectNode(nodeId)
-                  openDetail(nodeId)
+                  openDetail(nodeId, { x: ev.clientX, y: ev.clientY })
                 }
               }}
               className="mb-1.5 block w-full border-l-2 border-[var(--signal-import-gap)] bg-[var(--ink-50)] px-2.5 py-1.5 text-left"

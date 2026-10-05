@@ -120,6 +120,48 @@ export function validateTopology(
     }
   }
 
+  // 6. Warning: assembly (node dengan lebih dari satu parent/incoming relation)
+  const incomingSources = new Map<string, Set<string>>()
+  for (const e of edges) {
+    if (e.source === e.target) continue
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
+    if (!incomingSources.has(e.target)) incomingSources.set(e.target, new Set())
+    incomingSources.get(e.target)!.add(e.source)
+  }
+  for (const n of treeNodes) {
+    const sources = incomingSources.get(n.id)
+    if (sources && sources.size > 1) {
+      issues.push({
+        id: makeId('issue'),
+        level: 'warning',
+        message: `Assembly terdeteksi pada ${nodeLabel(n.id, treeNodes)}`,
+        detail: `Node memiliki ${sources.size} parent (${[...sources]
+          .map((id) => nodeLabel(id, treeNodes))
+          .join(', ')}). Assembly tidak diperbolehkan, satu node hanya boleh punya satu parent.`,
+        relatedNodeIds: [n.id, ...sources],
+        relatedEdgeIds: edges.filter((e) => e.target === n.id).map((e) => e.id),
+      })
+    }
+  }
+
+  // 7. Warning: turunan di stage yang sama
+  for (const e of edges) {
+    if (e.source === e.target) continue
+    const src = treeNodes.find((n) => n.id === e.source)
+    const tgt = treeNodes.find((n) => n.id === e.target)
+    if (!src || !tgt) continue
+    if (src.stageId === tgt.stageId) {
+      issues.push({
+        id: makeId('issue'),
+        level: 'warning',
+        message: `Turunan berada di stage yang sama: ${nodeLabel(src.id, treeNodes)} → ${nodeLabel(tgt.id, treeNodes)}`,
+        detail: 'Node turunan harus berada di stage yang berbeda dari parent-nya.',
+        relatedNodeIds: [src.id, tgt.id],
+        relatedEdgeIds: [e.id],
+      })
+    }
+  }
+
   return issues
 }
 

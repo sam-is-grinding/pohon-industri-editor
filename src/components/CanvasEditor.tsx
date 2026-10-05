@@ -7,6 +7,7 @@ import {
   MiniMap,
   useReactFlow,
   applyNodeChanges,
+  ConnectionLineType,
   type Node,
   type NodeChange,
   type Edge,
@@ -22,6 +23,7 @@ import '@xyflow/react/dist/style.css'
 
 import { useTreeStore } from '../store/useTreeStore'
 import { IndustrialNodeCard, type IndustrialNodeData } from './nodes/IndustrialNodeCard'
+import { ElbowEdge, type ElbowEdgeData } from './edges/ElbowEdge'
 import { StageHeaderBar } from './StageHeaderBar'
 import { StageColumnGuides } from './StageColumnGuides'
 import { NodeContextMenu } from './panels/NodeContextMenu'
@@ -39,6 +41,7 @@ import {
 import { computeHiddenNodeIds } from '../utils/visibility'
 
 const nodeTypes = { industrial: IndustrialNodeCard }
+const edgeTypes = { elbow: ElbowEdge }
 
 interface ContextMenuState {
   treeNodeId: string
@@ -178,24 +181,43 @@ export function CanvasEditor() {
     setNodes((nds) => applyNodeChanges(relevant, nds))
   }, [])
 
-  const rfEdges: Edge[] = useMemo(
-    () =>
-      edges
-        .filter((e) => !hiddenNodeIds.has(e.source) && !hiddenNodeIds.has(e.target))
-        .map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          type: 'default',
-          selected: e.id === selectedEdgeId,
-          style: {
-            strokeWidth: e.id === selectedEdgeId ? 2.5 : 1.5,
-            stroke: e.id === selectedEdgeId ? 'var(--selected)' : 'var(--ink-500)',
-          },
-          markerEnd: { type: 'arrowclosed' as const, color: 'var(--ink-500)', width: 16, height: 16 },
-        })),
-    [edges, selectedEdgeId, hiddenNodeIds],
-  )
+  const rfEdges: Edge[] = useMemo(() => {
+    const visible = edges.filter((e) => !hiddenNodeIds.has(e.source) && !hiddenNodeIds.has(e.target))
+
+    // Beri tiap node sumber "lane" batang vertikalnya sendiri, dikelompokkan per stage dan
+    // diurutkan dari atas ke bawah, supaya cabang dari parent berbeda tidak saling menumpuk.
+    const nodeById = new Map(treeNodes.map((n) => [n.id, n]))
+    const sourcesByStage = new Map<string, string[]>()
+    for (const id of new Set(visible.map((e) => e.source))) {
+      const n = nodeById.get(id)
+      if (!n) continue
+      const list = sourcesByStage.get(n.stageId) ?? []
+      list.push(id)
+      sourcesByStage.set(n.stageId, list)
+    }
+    const trunkOffsetBySource = new Map<string, number>()
+    const GAP = STAGE_COLUMN_WIDTH - NODE_CARD_WIDTH // jarak horizontal antar kartu
+    for (const ids of sourcesByStage.values()) {
+      ids.sort((a, b) => (nodeById.get(a)!.position.y - nodeById.get(b)!.position.y))
+      const usable = Math.max(GAP - 36, 8)
+      const step = ids.length > 1 ? Math.min(14, usable / (ids.length - 1)) : 0
+      ids.forEach((id, i) => trunkOffsetBySource.set(id, 18 + i * step))
+    }
+
+    return visible.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: 'elbow',
+      selected: e.id === selectedEdgeId,
+      data: { trunkOffset: trunkOffsetBySource.get(e.source) } satisfies ElbowEdgeData,
+      style: {
+        strokeWidth: e.id === selectedEdgeId ? 2.5 : 1.5,
+        stroke: e.id === selectedEdgeId ? 'var(--selected)' : 'var(--ink-500)',
+      },
+      markerEnd: { type: 'arrowclosed' as const, color: 'var(--ink-500)', width: 16, height: 16 },
+    }))
+  }, [edges, selectedEdgeId, hiddenNodeIds, treeNodes])
 
   const onConnect: OnConnect = useCallback(
     (params) => {
@@ -588,6 +610,7 @@ export function CanvasEditor() {
           nodes={nodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
           onConnectStart={onConnectStart}
@@ -612,7 +635,8 @@ export function CanvasEditor() {
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
           className="rf-transparent-bg"
-          defaultEdgeOptions={{ type: 'default' }}
+          defaultEdgeOptions={{ type: 'elbow' }}
+          connectionLineType={ConnectionLineType.Step}
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--ink-300)" />
           <Controls showInteractive={false} position="bottom-right" />

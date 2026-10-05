@@ -61,8 +61,7 @@ export function buildTemplate(id: TemplateId): TemplateResult {
       edge('e-1', 'tn-1', 'tn-3', 'transformation'),
       edge('e-2', 'tn-3', 'tn-4', 'transformation'),
       edge('e-3', 'tn-3', 'tn-5', 'output'),
-      edge('e-4', 'tn-5', 'tn-6', 'transformation'),
-      edge('e-5', 'tn-2', 'tn-6', 'input'),
+      edge('e-5', 'tn-2', 'tn-6', 'transformation'),
     ]
 
     return { stages, treeNodes, edges }
@@ -70,7 +69,8 @@ export function buildTemplate(id: TemplateId): TemplateResult {
 
   // example_iron_steel
   const stages = defaultStages()
-  stages.push({ id: 'stage-S5', code: 'S5', name: 'Aplikasi', order: 5 })
+  stages.push({ id: 'stage-S5', code: 'S5', name: 'Produk Akhir', order: 5 })
+  stages.push({ id: 'stage-S6', code: 'S6', name: 'Aplikasi', order: 6 })
   const byOrder = (o: number) => stages.find((s) => s.order === o)!.id
 
   const treeNodes: TreeNode[] = [
@@ -78,8 +78,8 @@ export function buildTemplate(id: TemplateId): TemplateResult {
     tn('tn-i2', 'pig-iron', byOrder(2), 2, 0),
     tn('tn-i3', 'crude-steel', byOrder(3), 3, 0),
     tn('tn-i4', 'hot-rolled-coil', byOrder(4), 4, 0),
-    tn('tn-i5', 'cold-rolled-coil', byOrder(4), 4, 2),
-    tn('tn-i6', 'automotive-panel', byOrder(5), 5, 1),
+    tn('tn-i5', 'cold-rolled-coil', byOrder(5), 5, 0),
+    tn('tn-i6', 'automotive-panel', byOrder(6), 6, 0),
   ]
 
   const edges: IndustrialEdge[] = [
